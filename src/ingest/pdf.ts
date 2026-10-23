@@ -13,8 +13,7 @@ function configure() {
   configured = true;
 }
 
-import { PdfPasswordError } from './errors';
-export { PdfPasswordError };
+import { FilePasswordError } from './errors';
 
 export async function openPdf(bytes: Uint8Array, password?: string): Promise<PDFDocumentProxy> {
   configure();
@@ -29,7 +28,7 @@ export async function openPdf(bytes: Uint8Array, password?: string): Promise<PDF
     const err = e as { name?: string; code?: number };
     if (err?.name === 'PasswordException') {
       // code 1 = NEED_PASSWORD, 2 = INCORRECT_PASSWORD
-      throw new PdfPasswordError(err.code === 2);
+      throw new FilePasswordError(err.code === 2, 'PDF');
     }
     throw e;
   }

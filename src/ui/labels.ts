@@ -18,6 +18,8 @@ export const FLAG_LABEL: Record<string, string> = {
   time_unreadable: 'อ่านเวลาไม่ได้ จึงใช้เฉพาะวันที่ของรายการนี้',
   low_ocr_confidence: 'OCR ความมั่นใจต่ำ ควรตรวจกับต้นฉบับ',
   direction_from_keyword: 'ทิศทางเงินได้จากการอ่านข้อความ ไม่ใช่จากคอลัมน์',
+  amount_from_balance: 'จำนวนเงินคำนวณจากส่วนต่างยอดคงเหลือ (ช่องจำนวนเงินในต้นฉบับว่าง)',
+  reversal: 'รายการกลับรายการ/ยกเลิก (ยอดติดลบในต้นฉบับ) — เงินไหลกลับเข้าบัญชี',
 };
 
 const METRIC: Record<string, { label: string; fmt?: (v: number | string) => string }> = {

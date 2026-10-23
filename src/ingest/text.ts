@@ -1,3 +1,4 @@
+import { thaiDigitsToArabic } from '../core/thai';
 // ถอดรหัสไฟล์ข้อความ — CSV จากระบบธนาคาร/โปรแกรมเก่าของไทยมักเป็น TIS-620 / Windows-874
 
 export function decodeText(bytes: Uint8Array): { text: string; encoding: string } {
@@ -20,4 +21,9 @@ export function decodeText(bytes: Uint8Array): { text: string; encoding: string 
       return { text: new TextDecoder('utf-8').decode(bytes), encoding: 'utf-8 (lossy)' };
     }
   }
+}
+
+/** ทำให้ข้อความหัวคอลัมน์เทียบกันได้: เลขไทย→อารบิก ตัวพิมพ์เล็ก ตัดช่องว่างและเครื่องหมาย */
+export function normalizeHeader(s: string): string {
+  return thaiDigitsToArabic(s).toLowerCase().replace(/[\s._\-()[\]/\\:*]/g, '');
 }

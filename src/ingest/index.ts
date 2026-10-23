@@ -30,7 +30,7 @@ export interface ReadResult {
   notes: string[];
 }
 
-export { UnsupportedFileError, PdfPasswordError } from './errors';
+export { UnsupportedFileError, FilePasswordError } from './errors';
 import { UnsupportedFileError } from './errors';
 
 export function sniffKind(name: string, b: Uint8Array): SourceKind {
@@ -53,20 +53,29 @@ export async function readStatementFile(file: File, opts: ReadOptions = {}): Pro
   const base = { name: file.name, size: file.size, sha256, kind };
   const notes: string[] = [];
 
-  if (kind === 'xls') {
-    throw new UnsupportedFileError('ไฟล์ .xls รุ่นเก่ายังไม่รองรับ — เปิดด้วย Excel แล้วบันทึกเป็น .xlsx หรือ .csv ก่อนนำเข้า');
-  }
   if (kind === 'csv') {
     opts.onProgress?.({ phase: 'อ่านไฟล์ข้อความ' });
     const t = readCsv(bytes);
     return { ...base, tables: [t], notes: t.notes ?? [] };
   }
-  if (kind === 'xlsx') {
+  if (kind === 'xlsx' || kind === 'xls') {
+    let xlsxBytes: Uint8Array = bytes;
+    if (kind === 'xls') {
+      // ไฟล์ OLE: .xlsx ที่ตั้งรหัสผ่านจะถูกห่อเป็น OLE (EncryptionInfo + EncryptedPackage); ที่เหลือคือ .xls รุ่นเก่า
+      const { openEncryptedPackage, decryptOoxml } = await import('./ooxmlCrypto');
+      const cfb = openEncryptedPackage(bytes);
+      if (!cfb) {
+        throw new UnsupportedFileError('ไฟล์ .xls รุ่นเก่ายังไม่รองรับ — เปิดด้วย Excel แล้วบันทึกเป็น .xlsx หรือ .csv ก่อนนำเข้า');
+      }
+      opts.onProgress?.({ phase: 'ถอดรหัสไฟล์ Excel' });
+      xlsxBytes = decryptOoxml(cfb, opts.password);
+      notes.push('ไฟล์ Excel ที่ตั้งรหัสผ่าน — ถอดรหัสในเครื่องนี้ (SHA-256 ที่บันทึกคือของไฟล์ต้นฉบับที่เข้ารหัส)');
+    }
     opts.onProgress?.({ phase: 'อ่านไฟล์ Excel' });
     const { readXlsx } = await import('./xlsx');
-    const tables = await readXlsx(buf);
+    const tables = await readXlsx(xlsxBytes.buffer.slice(xlsxBytes.byteOffset, xlsxBytes.byteOffset + xlsxBytes.byteLength) as ArrayBuffer);
     if (!tables.length) throw new UnsupportedFileError('ไม่พบข้อมูลในไฟล์ Excel');
-    return { ...base, tables, notes };
+    return { ...base, kind: 'xlsx', tables, notes };
   }
 
   // PDF / รูปภาพ — โหลดโมดูลหนัก (pdf.js / tesseract) เมื่อจำเป็นเท่านั้น

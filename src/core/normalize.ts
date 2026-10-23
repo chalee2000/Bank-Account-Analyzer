@@ -8,36 +8,51 @@ export interface BankInfo {
   code: string;
   nameTh: string;
   aliases: string[];
+  /** รหัสธนาคาร 3 หลักของ ธปท. (ใช้ในไฟล์ส่งออกที่ระบุธนาคารเป็นตัวเลข เช่น 014 = SCB) */
+  bot?: string;
+  /** จำนวนหลักมาตรฐานของเลขบัญชี — ใช้เติม 0 นำหน้าที่ Excel ตัดออก */
+  digits?: number;
 }
 
 // รหัส/ชื่อธนาคารที่พบบ่อย (ข้อมูลทั่วไป ใช้จับคู่ข้อความเท่านั้น ไม่ได้อิงรูปแบบไฟล์ของธนาคาร)
 export const BANKS: BankInfo[] = [
-  { code: 'KBANK', nameTh: 'กสิกรไทย', aliases: ['kbank', 'kasikorn', 'กสิกร', 'ธ.กสิกรไทย', 'k-bank', 'kplus', 'k plus'] },
-  { code: 'SCB', nameTh: 'ไทยพาณิชย์', aliases: ['scb', 'siam commercial', 'ไทยพาณิชย์', 'ธ.ไทยพาณิชย์'] },
-  { code: 'BBL', nameTh: 'กรุงเทพ', aliases: ['bbl', 'bangkok bank', 'ธนาคารกรุงเทพ', 'ธ.กรุงเทพ', 'กรุงเทพ'] },
-  { code: 'KTB', nameTh: 'กรุงไทย', aliases: ['ktb', 'krungthai', 'krung thai', 'กรุงไทย', 'ธ.กรุงไทย'] },
-  { code: 'BAY', nameTh: 'กรุงศรีอยุธยา', aliases: ['bay', 'krungsri', 'กรุงศรี', 'กรุงศรีอยุธยา', 'ธ.กรุงศรี'] },
-  { code: 'TTB', nameTh: 'ทีทีบี', aliases: ['ttb', 'tmbthanachart', 'tmb', 'thanachart', 'ทหารไทยธนชาต', 'ทหารไทย', 'ธนชาต', 'ทีเอ็มบี'] },
-  { code: 'GSB', nameTh: 'ออมสิน', aliases: ['gsb', 'government savings', 'ออมสิน', 'ธ.ออมสิน'] },
-  { code: 'BAAC', nameTh: 'ธ.ก.ส.', aliases: ['baac', 'ธกส', 'ธ.ก.ส.', 'เพื่อการเกษตร'] },
-  { code: 'GHB', nameTh: 'อาคารสงเคราะห์', aliases: ['ghb', 'อาคารสงเคราะห์', 'ธอส', 'ธ.อ.ส.'] },
-  { code: 'UOB', nameTh: 'ยูโอบี', aliases: ['uob', 'ยูโอบี'] },
-  { code: 'CIMBT', nameTh: 'ซีไอเอ็มบี ไทย', aliases: ['cimb', 'cimbt', 'ซีไอเอ็มบี'] },
-  { code: 'LHBANK', nameTh: 'แลนด์ แอนด์ เฮ้าส์', aliases: ['lhbank', 'lh bank', 'แลนด์ แอนด์ เฮ้าส์', 'แลนด์แอนด์เฮ้าส์'] },
-  { code: 'TISCO', nameTh: 'ทิสโก้', aliases: ['tisco', 'ทิสโก้'] },
-  { code: 'KKP', nameTh: 'เกียรตินาคินภัทร', aliases: ['kkp', 'kiatnakin', 'เกียรตินาคิน'] },
-  { code: 'ICBC', nameTh: 'ไอซีบีซี', aliases: ['icbc', 'ไอซีบีซี'] },
-  { code: 'IBANK', nameTh: 'อิสลาม', aliases: ['ibank', 'islamic bank', 'อิสลาม', 'ธนาคารอิสลาม'] },
-  { code: 'SME', nameTh: 'เอสเอ็มอี', aliases: ['sme bank', 'sme d', 'เอสเอ็มอี'] },
-  { code: 'EXIM', nameTh: 'เพื่อการส่งออกและนำเข้า', aliases: ['exim', 'เอ็กซิม'] },
+  { code: 'KBANK', nameTh: 'กสิกรไทย', bot: '004', digits: 10, aliases: ['kbank', 'kbnk', 'kasikorn', 'กสิกร', 'ธ.กสิกรไทย', 'k-bank', 'kplus', 'k plus'] },
+  { code: 'SCB', nameTh: 'ไทยพาณิชย์', bot: '014', digits: 10, aliases: ['scb', 'scba', 'siam commercial', 'ไทยพาณิชย์', 'ธ.ไทยพาณิชย์'] },
+  { code: 'BBL', nameTh: 'กรุงเทพ', bot: '002', digits: 10, aliases: ['bbl', 'bbla', 'bangkok bank', 'ธนาคารกรุงเทพ', 'ธ.กรุงเทพ', 'กรุงเทพ'] },
+  { code: 'KTB', nameTh: 'กรุงไทย', bot: '006', digits: 10, aliases: ['ktb', 'ktba', 'krungthai', 'krung thai', 'กรุงไทย', 'ธ.กรุงไทย'] },
+  { code: 'BAY', nameTh: 'กรุงศรีอยุธยา', bot: '025', digits: 10, aliases: ['bay', 'baya', 'krungsri', 'กรุงศรี', 'กรุงศรีอยุธยา', 'ธ.กรุงศรี'] },
+  { code: 'TTB', nameTh: 'ทีทีบี', bot: '011', digits: 10, aliases: ['ttb', 'tmba', 'tmbthanachart', 'tmb', 'thanachart', 'ทหารไทยธนชาต', 'ทหารไทย', 'ธนชาต', 'ทีเอ็มบี'] },
+  { code: 'GSB', nameTh: 'ออมสิน', bot: '030', digits: 12, aliases: ['gsb', 'gsba', 'government savings', 'ออมสิน', 'ธ.ออมสิน'] },
+  { code: 'BAAC', nameTh: 'ธ.ก.ส.', bot: '034', digits: 12, aliases: ['baac', 'ธกส', 'ธ.ก.ส.', 'เพื่อการเกษตร'] },
+  { code: 'GHB', nameTh: 'อาคารสงเคราะห์', bot: '033', aliases: ['ghb', 'อาคารสงเคราะห์', 'ธอส', 'ธ.อ.ส.'] },
+  { code: 'UOB', nameTh: 'ยูโอบี', bot: '024', aliases: ['uob', 'ยูโอบี'] },
+  { code: 'CIMBT', nameTh: 'ซีไอเอ็มบี ไทย', bot: '022', aliases: ['cimb', 'cimbt', 'ซีไอเอ็มบี'] },
+  { code: 'LHBANK', nameTh: 'แลนด์ แอนด์ เฮ้าส์', bot: '073', aliases: ['lhbank', 'lh bank', 'แลนด์ แอนด์ เฮ้าส์', 'แลนด์แอนด์เฮ้าส์'] },
+  { code: 'TISCO', nameTh: 'ทิสโก้', bot: '067', aliases: ['tisco', 'ทิสโก้'] },
+  { code: 'KKP', nameTh: 'เกียรตินาคินภัทร', bot: '069', aliases: ['kkp', 'kiatnakin', 'เกียรตินาคิน'] },
+  { code: 'ICBC', nameTh: 'ไอซีบีซี', bot: '070', aliases: ['icbc', 'ไอซีบีซี'] },
+  { code: 'IBANK', nameTh: 'อิสลาม', bot: '066', aliases: ['ibank', 'islamic bank', 'อิสลาม', 'ธนาคารอิสลาม'] },
+  { code: 'SME', nameTh: 'เอสเอ็มอี', bot: '098', aliases: ['sme bank', 'sme d', 'เอสเอ็มอี'] },
+  { code: 'EXIM', nameTh: 'เพื่อการส่งออกและนำเข้า', bot: '035', aliases: ['exim', 'เอ็กซิม'] },
+  { code: 'TCRB', nameTh: 'ไทยเครดิต', bot: '071', aliases: ['tcrb', 'thai credit', 'ไทยเครดิต'] },
+  { code: 'CITI', nameTh: 'ซิตี้แบงก์', bot: '017', aliases: ['citibank', 'citi bank', 'ซิตี้แบงก์'] },
+  { code: 'SMBC', nameTh: 'ซูมิโตโม มิตซุย', bot: '018', aliases: ['smbc', 'sumitomo', 'ซูมิโตโม'] },
+  { code: 'SCBT', nameTh: 'สแตนดาร์ดชาร์เตอร์ด', bot: '020', aliases: ['standard chartered', 'สแตนดาร์ดชาร์เตอร์ด'] },
+  { code: 'HSBC', nameTh: 'เอชเอสบีซี', bot: '031', aliases: ['hsbc', 'เอชเอสบีซี'] },
+  { code: 'MHCB', nameTh: 'มิซูโฮ', bot: '039', aliases: ['mizuho', 'mhcb', 'มิซูโฮ'] },
+  { code: 'BNPP', nameTh: 'บีเอ็นพี พารีบาส์', bot: '045', aliases: ['bnp paribas', 'bnpp', 'บีเอ็นพี'] },
+  { code: 'BOC', nameTh: 'แห่งประเทศจีน', bot: '052', aliases: ['bank of china', 'แห่งประเทศจีน'] },
   { code: 'TRUEMONEY', nameTh: 'ทรูมันนี่', aliases: ['truemoney', 'true money', 'ทรูมันนี่', 'ทรูมันนี่วอลเล็ท', 'true wallet'] },
   { code: 'PROMPTPAY', nameTh: 'พร้อมเพย์', aliases: ['promptpay', 'prompt pay', 'พร้อมเพย์'] },
   { code: 'LINEPAY', nameTh: 'ไลน์เพย์ / Rabbit LINE Pay', aliases: ['line pay', 'linepay', 'rabbit line pay', 'ไลน์เพย์'] },
   { code: 'SHOPEEPAY', nameTh: 'ShopeePay / AirPay', aliases: ['shopeepay', 'airpay', 'ช้อปปี้เพย์'] },
 ];
 
+/** ธนาคารที่ ธปท. มีรหัสแต่ยังไม่มีในรายการด้านบน → ใช้รหัส `BOT###` เพื่อไม่ให้ปะปนกับธนาคารอื่น */
+const BOT_UNKNOWN_PREFIX = 'BOT';
+
 const BANK_BY_ALIAS: [string, string][] = BANKS.flatMap((b) =>
-  [b.code.toLowerCase(), ...b.aliases.map((a) => a.toLowerCase())].map((a) => [a, b.code] as [string, string]),
+  [b.code.toLowerCase(), b.nameTh.toLowerCase(), ...b.aliases.map((a) => a.toLowerCase())].map((a) => [a, b.code] as [string, string]),
 ).sort((a, b) => b[0].length - a[0].length); // alias ยาวก่อน
 
 /** แปลงชื่อ/ตัวย่อธนาคารในข้อความ → รหัสมาตรฐาน (undefined ถ้าไม่พบ) */
@@ -56,7 +71,32 @@ export function normalizeBank(raw: string | undefined | null): string | undefine
 
 export function bankDisplay(code: string | undefined): string {
   if (!code) return '';
-  return BANKS.find((b) => b.code === code)?.nameTh ?? code;
+  const known = BANKS.find((b) => b.code === code)?.nameTh;
+  if (known) return known;
+  return code.startsWith(BOT_UNKNOWN_PREFIX) ? `ธนาคารรหัส ${code.slice(BOT_UNKNOWN_PREFIX.length)}` : code;
+}
+
+/** รหัสธนาคาร 1–3 หลักของ ธปท. (เช่น "14" หรือ "014") → รหัสมาตรฐานของแอป; รหัสที่ไม่รู้จักคงไว้เป็น BOT### */
+export function bankFromBotCode(raw: string | number | undefined | null): string | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const digits = String(raw).trim();
+  if (!/^\d{1,3}$/.test(digits) || Number(digits) === 0) return undefined;
+  const code = digits.padStart(3, '0');
+  if (code === '065') return 'TTB'; // ธนชาต (ควบรวมเป็น ttb)
+  return BANKS.find((b) => b.bot === code)?.code ?? `${BOT_UNKNOWN_PREFIX}${code}`;
+}
+
+/** ค่าในเซลล์ "ธนาคาร": ตัวเลข = รหัส ธปท., ข้อความ = ชื่อ/ตัวย่อ; ชื่อที่ไม่รู้จักคงไว้ตามต้นฉบับ (ไม่ปะปนกับธนาคารอื่น) */
+export function bankFromCell(raw: string | undefined | null): string | undefined {
+  const s = (raw ?? '').trim();
+  if (!s) return undefined;
+  if (/^\d{1,3}$/.test(thaiDigitsToArabic(s))) return bankFromBotCode(thaiDigitsToArabic(s));
+  return normalizeBank(s) ?? s;
+}
+
+/** จำนวนหลักมาตรฐานของเลขบัญชีธนาคารนั้น (ถ้าทราบ) */
+export function accountDigits(bank: string | undefined): number | undefined {
+  return BANKS.find((b) => b.code === bank)?.digits;
 }
 
 // ---------------- Account number ----------------
@@ -66,6 +106,8 @@ export interface NormalizedAccount {
   number: string;
   masked: boolean;
   digitsVisible: number;
+  /** true = เติมเลข 0 นำหน้าให้ครบหลักมาตรฐานของธนาคาร (Excel ตัด 0 นำหน้าของช่องตัวเลข) */
+  padded?: boolean;
 }
 
 /** ตัดขีด/ช่องว่าง/จุด แปลงเลขไทย แปลงตัวปิดบัง (x, X, *, #, •) เป็น X */
@@ -78,6 +120,20 @@ export function normalizeAccountNumber(raw: string | undefined | null): Normaliz
   const visible = (s.match(/\d/g) ?? []).length;
   if (visible < 3) return null; // สั้น/ปิดบางเกินกว่าจะใช้ระบุบัญชีได้
   return { number: s, masked: s.includes('X'), digitsVisible: visible };
+}
+
+/**
+ * normalize เลขบัญชีจากช่องที่ระบุเป็นเลขบัญชีแน่นอน และเติม 0 นำหน้าถ้าเลขล้วนสั้นกว่าหลักมาตรฐานของธนาคาร 1–3 หลัก
+ * (Excel เก็บเลขบัญชีเป็นตัวเลขแล้วตัด 0 นำหน้า) — เป็นการกู้ค่าที่หายไปอย่างแน่นอน ไม่ใช่การเดา
+ */
+export function normalizeAccountForBank(raw: string | undefined | null, bank: string | undefined): NormalizedAccount | null {
+  const n = normalizeAccountNumber(raw);
+  if (!n || n.masked) return n;
+  const want = accountDigits(bank);
+  if (want && n.number.length < want && n.number.length >= want - 3) {
+    return { ...n, number: n.number.padStart(want, '0'), digitsVisible: want, padded: true };
+  }
+  return n;
 }
 
 /** เลขสองชุดเข้ากันได้หรือไม่ (X ตรงกับเลขใดก็ได้) — เทียบจากหลักท้าย เพราะธนาคารมักแสดงหลักท้าย */

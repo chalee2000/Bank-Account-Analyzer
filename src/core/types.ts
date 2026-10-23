@@ -20,6 +20,8 @@ export interface Account {
   /** ชื่อ/หมายเหตุที่ผู้สืบสวนกรอกเอง */
   label?: string;
   note?: string;
+  /** ข้อมูลเจ้าของบัญชีที่อ่านจากหัวเอกสาร statement (สาขา ที่อยู่ สถานะ ฯลฯ) — แสดงเฉพาะในหน้าบัญชี ไม่ใส่ในรายงาน */
+  meta?: Record<string, string>;
 }
 
 export type TxnKind =
@@ -30,6 +32,25 @@ export type TxnKind =
   | 'fee'
   | 'interest'
   | 'other';
+
+/** หลักฐานเสริมรายธุรกรรมที่มากับ statement (ถ้าธนาคารให้มา) — ใช้เชื่อมโยงอุปกรณ์/สถานที่/เครือข่าย */
+export type EvidenceKey =
+  | 'ip' | 'atmId' | 'atmBank' | 'branch' | 'teller' | 'lat' | 'lng' | 'phone' | 'email' | 'card' | 'cheque';
+export type TxnExtra = Partial<Record<EvidenceKey, string>>;
+
+export const EVIDENCE_LABEL: Record<EvidenceKey, string> = {
+  ip: 'IP Address',
+  atmId: 'รหัสตู้/เครื่องที่ทำรายการ',
+  atmBank: 'ธนาคารเจ้าของตู้/ช่องทาง',
+  branch: 'รหัสสาขา',
+  teller: 'รหัสผู้ทำรายการ (Teller)',
+  lat: 'ละติจูด',
+  lng: 'ลองจิจูด',
+  phone: 'เบอร์โทรศัพท์',
+  email: 'อีเมล',
+  card: 'หมายเลขบัตร',
+  cheque: 'เลขที่เช็ค',
+};
 
 export interface SourceRef {
   fileId: string;
@@ -59,6 +80,8 @@ export interface Txn {
   /** บัญชีเจ้าของ statement ที่รายการนี้มาจาก (อาจมีมากกว่า 1 ถ้าเป็น mirror) */
   owners: string[];
   sources: SourceRef[];
+  /** หลักฐานเสริมจาก statement (IP, ตู้ ATM, พิกัด ฯลฯ) */
+  extra?: TxnExtra;
   /** ผูกคู่บัญชีจากการเดาข้อความ/เลขที่ปิดบาง — ต้องตรวจสอบ */
   inferred?: boolean;
   /** รายการนี้ถูกรวมจาก 2 statement (mirror) */

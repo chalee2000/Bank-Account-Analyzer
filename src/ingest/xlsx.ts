@@ -38,7 +38,11 @@ export async function readXlsx(buf: ArrayBuffer): Promise<RawTable[]> {
     for (let r = 1; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
       const cells: string[] = [];
-      for (let c = 1; c <= width; c++) cells.push(cellToString(row.getCell(c).value));
+      for (let c = 1; c <= width; c++) {
+        const cell = row.getCell(c);
+        // เซลล์ที่ถูก merge: exceljs คืนค่าของเซลล์หลักซ้ำทุกช่อง — เก็บเฉพาะเซลล์หลักเพื่อไม่ให้ข้อความหัวเอกสารซ้ำ
+        cells.push(cell.type === ExcelJS.ValueType.Merge ? '' : cellToString(cell.value));
+      }
       rows.push(cells);
     }
     while (rows.length && rows[rows.length - 1]!.every((c) => c === '')) rows.pop();

@@ -4,7 +4,11 @@
 
 import { compactThai, fixThaiSpacing, parseAmount, parseDateTime, thaiDigitsToArabic } from '../core/thai';
 import { normalizeAccountNumber, normalizeBank } from '../core/normalize';
+import { detectFormat } from './formats';
+import { normalizeHeader } from './text';
 import type { ColumnMapping, OwnerSuggestion, RawTable } from './types';
+
+export { normalizeHeader };
 
 type FieldKey =
   | 'date' | 'time' | 'description' | 'withdrawal' | 'deposit' | 'amount' | 'drcr'
@@ -32,10 +36,6 @@ const KEYWORDS: Record<FieldKey, string[]> = {
 function keywordMatches(h: string, kw: string): boolean {
   if (kw.length <= 3) return h === kw;
   return h.includes(kw);
-}
-
-export function normalizeHeader(s: string): string {
-  return thaiDigitsToArabic(s).toLowerCase().replace(/[\s._\-()[\]/\\:*]/g, '');
 }
 
 /** คืนฟิลด์ที่หัวคอลัมน์นี้น่าจะเป็น พร้อมคะแนน (ความยาวคำที่ตรง) */
@@ -120,6 +120,8 @@ export function detectDayFirst(dateSamples: string[]): boolean {
 }
 
 export function detectMapping(table: RawTable): ColumnMapping {
+  const known = detectFormat(table);
+  if (known) return known.mapping;
   const rows = table.rows;
   const header = findHeader(rows);
   const base: ColumnMapping = {
@@ -253,6 +255,8 @@ const spaced = (words: string[]) =>
   new RegExp('(' + words.map((w) => [...w].map((c) => c.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')).join('\\s*')).join('|') + ')', 'i');
 const ACCT_LABEL_RE = spaced(['เลขที่บัญชี', 'หมายเลขบัญชี', 'เลขบัญชี', 'accountno', 'accountnumber', 'account#', 'a/cno', 'acctno', 'acct.no']);
 const NAME_LABEL_RE = spaced(['ชื่อบัญชี', 'ชื่อเจ้าของบัญชี', 'ชื่อลูกค้า', 'accountname', 'customername', 'nameofaccount', 'a/cname']);
+/** ข้อความที่มักต่อท้ายชื่อในบรรทัดหัวเอกสารเดียวกัน — ตัดชื่อไว้เพียงเท่านี้ */
+const NAME_STOP_RE = /\s+(?:เลขประจำตัว|เลขที่บัตร|เลขบัตร|ที่อยู่|สาขา|ประเภท|สถานะ|วันที่|โทร|ID\b|Tel\b)|\s+\d{6,}/i;
 const PERIOD_LABEL_RE = spaced(['ระหว่างวันที่', 'ช่วงเวลา', 'statementperiod', 'period', 'ตั้งแต่วันที่', 'fromdate']);
 
 /** หาเลขบัญชี/ชื่อ/ธนาคารเจ้าของ statement จากบรรทัดก่อนหัวตาราง (หรือ 15 บรรทัดแรกถ้าไม่มีหัวตาราง) */
@@ -260,7 +264,10 @@ export function suggestOwner(rows: string[][], headerRow: number, extraText: str
   const limit = headerRow > 0 ? headerRow : Math.min(rows.length, 15);
   const lines: string[] = [...extraText];
   for (let r = 0; r < limit; r++) {
-    const line = rows[r]!.filter(Boolean).join(' ');
+    const cells = rows[r]!.filter(Boolean);
+    // หัวเอกสารที่แบ่งเป็นหลายช่อง ("ชื่อบัญชี : …" | "ที่อยู่ : …") ให้อ่านทีละเซลล์ก่อน ไม่ให้ค่าของช่องหนึ่งไหลไปต่อท้ายอีกช่อง
+    if (cells.length > 1) lines.push(...cells);
+    const line = cells.join(' ');
     if (line) lines.push(line);
   }
   const out: OwnerSuggestion = {};
@@ -277,11 +284,47 @@ export function suggestOwner(rows: string[][], headerRow: number, extraText: str
         if (n) out.number = n.number;
       }
       if (!out.name && NAME_LABEL_RE.test(seg)) {
-        const after = seg.split(NAME_LABEL_RE).slice(2).join(' ').replace(/^[\s:：]+/, '').trim();
+        const after = seg.split(NAME_LABEL_RE).slice(2).join(' ').replace(/^[\s:：]+/, '').split(NAME_STOP_RE)[0]!.trim();
         if (after && after.length < 80 && !/^[0-9\s\-:]+$/.test(after) && !ACCT_LABEL_RE.test(after)) out.name = after;
       }
       if (!out.period && PERIOD_LABEL_RE.test(seg)) out.period = seg;
     }
   }
   return out;
+}
+
+// ---------------- Table inspection ----------------
+
+export interface TableInspection {
+  mapping: ColumnMapping;
+  owner: OwnerSuggestion;
+}
+
+/** ตรวจตารางหนึ่งตาราง: จับคู่คอลัมน์ + หาข้อมูลเจ้าของ statement (รูปแบบธนาคารที่รู้จักแม่นกว่าการเดาทั่วไป) */
+export function inspectTable(table: RawTable): TableInspection {
+  const fmt = detectFormat(table);
+  const mapping = fmt?.mapping ?? detectMapping(table);
+  // ตารางที่หัวตารางอยู่แถวแรก (ไฟล์ส่งออก) ไม่มีหัวเอกสาร — ไม่ต้องกวาดอ่านแถวข้อมูลหาชื่อบัญชี
+  const generic: OwnerSuggestion = fmt && mapping.headerRow === 0 ? {} : suggestOwner(table.rows, mapping.headerRow);
+  const owner: OwnerSuggestion = { ...generic };
+  if (fmt) {
+    for (const [k, v] of Object.entries(fmt.owner)) if (v !== undefined) (owner as Record<string, unknown>)[k] = v;
+    owner.formatLabel = fmt.label;
+  }
+  return { mapping, owner };
+}
+
+/** เลือกตารางที่น่าจะเป็น statement ที่สุดจากหลายชีต (รูปแบบที่รู้จักชนะ แล้วดูจำนวนหัวคอลัมน์ที่จับคู่ได้) */
+export function pickBestTable(tables: RawTable[]): number {
+  let best = 0;
+  let bestScore = -1;
+  tables.forEach((t, i) => {
+    const f = detectFormat(t);
+    const score = f ? 1000 + f.score : (findHeader(t.rows)?.matched ?? 0) * 10;
+    if (score > bestScore) {
+      best = i;
+      bestScore = score;
+    }
+  });
+  return best;
 }

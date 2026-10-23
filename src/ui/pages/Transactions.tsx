@@ -10,7 +10,7 @@ export function TransactionsPage() {
   const d = derived.value;
   const res = analysis.value;
   const params = route.value.params;
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(params.get('q') ?? '');
   const [kind, setKind] = useState<'' | TxnKind>('');
   const [acc, setAcc] = useState(params.get('acc') ?? '');
   const [minAmt, setMinAmt] = useState('');
@@ -48,7 +48,7 @@ export function TransactionsPage() {
       if (sigIds && !sigIds.has(x.id)) return false;
       if (flagged && !(x.flags?.length || x.inferred)) return false;
       if (t) {
-        const hay = `${labelOf(x.from)} ${labelOf(x.to)} ${x.description ?? ''} ${x.reference ?? ''} ${x.channel ?? ''} ${x.location ?? ''}`.toLowerCase();
+        const hay = `${labelOf(x.from)} ${labelOf(x.to)} ${x.description ?? ''} ${x.reference ?? ''} ${x.channel ?? ''} ${x.location ?? ''} ${x.extra ? Object.values(x.extra).join(' ') : ''}`.toLowerCase();
         if (!hay.includes(t)) return false;
       }
       return true;
@@ -62,6 +62,7 @@ export function TransactionsPage() {
     { key: 'amount', label: 'จำนวนเงิน', width: 120, num: true, sortable: true, value: (r) => r.amount, render: (r) => fmtBaht(r.amount) },
     { key: 'kind', label: 'ชนิด', width: 100, sortable: true, value: (r) => KIND_LABEL[r.kind], render: (r) => KIND_LABEL[r.kind] },
     { key: 'channel', label: 'ช่องทาง', width: 110, sortable: true, value: (r) => r.channel ?? '' },
+    { key: 'ip', label: 'IP', width: 130, sortable: true, value: (r) => r.extra?.ip ?? '' },
     { key: 'desc', label: 'รายละเอียด', width: 320, value: (r) => r.description ?? '', title: (r) => r.description },
     {
       key: 'flags', label: 'หมายเหตุ', width: 150,
@@ -71,6 +72,7 @@ export function TransactionsPage() {
           {r.inferred && <Pill kind="warn">อนุมาน</Pill>}
           {r.flags?.includes('balance_mismatch') && <Pill kind="warn">ยอดไม่ต่อเนื่อง</Pill>}
           {r.flags?.includes('low_ocr_confidence') && <Pill kind="warn">OCR</Pill>}
+          {r.flags?.includes('reversal') && <Pill kind="warn">กลับรายการ</Pill>}
         </span>
       ),
     },
@@ -79,9 +81,9 @@ export function TransactionsPage() {
   const sel = inspector.value?.kind === 'txn' ? inspector.value.id : null;
 
   const copy = async () => {
-    const lines = [['วันเวลา', 'จาก', 'ไป', 'จำนวนเงิน', 'ชนิด', 'ช่องทาง', 'รายละเอียด'].join('\t')];
+    const lines = [['วันเวลา', 'จาก', 'ไป', 'จำนวนเงิน', 'ชนิด', 'ช่องทาง', 'IP', 'รายละเอียด'].join('\t')];
     for (const r of sorted.slice(0, 50_000)) {
-      lines.push([formatTs(r.ts, r.hasTime, true), labelOf(r.from), labelOf(r.to), r.amount.toFixed(2), KIND_LABEL[r.kind], r.channel ?? '', (r.description ?? '').replace(/\s+/g, ' ')].join('\t'));
+      lines.push([formatTs(r.ts, r.hasTime, true), labelOf(r.from), labelOf(r.to), r.amount.toFixed(2), KIND_LABEL[r.kind], r.channel ?? '', r.extra?.ip ?? '', (r.description ?? '').replace(/\s+/g, ' ')].join('\t'));
     }
     try {
       await navigator.clipboard.writeText(lines.join('\n'));
@@ -95,7 +97,7 @@ export function TransactionsPage() {
   return (
     <>
       <div class="row wrap" style="padding:12px 20px;border-bottom:1px solid var(--border);background:var(--surface-1)">
-        <input class="input" style="width:230px" placeholder="ค้นหา (ชื่อ เลขบัญชี รายละเอียด)" value={q} onInput={(e) => setQ((e.target as HTMLInputElement).value)} aria-label="ค้นหาธุรกรรม" />
+        <input class="input" style="width:230px" placeholder="ค้นหา (ชื่อ เลขบัญชี IP รายละเอียด)" value={q} onInput={(e) => setQ((e.target as HTMLInputElement).value)} aria-label="ค้นหาธุรกรรม" />
         <select class="select" style="width:210px" value={acc} onChange={(e) => setAcc((e.target as HTMLSelectElement).value)} aria-label="กรองบัญชี">
           <option value="">ทุกบัญชี</option>
           {accounts.map((a) => <option value={a.id}>{labelOf(a.id)}</option>)}

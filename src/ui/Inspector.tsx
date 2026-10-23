@@ -7,7 +7,7 @@ import { FLAG_LABEL, KIND_LABEL, metricRows } from './labels';
 import { bankDisplay, formatAccountNumber } from '../core/normalize';
 import { fmtBaht, fmtDuration, fmtInt, fmtPct, formatThaiDateTime } from '../core/thai';
 import { ROLE_LABEL, SIGNAL_LABEL, PRIORITY_DISCLAIMER } from '../analysis';
-import type { Finding, Signal } from '../core/types';
+import { EVIDENCE_LABEL, type EvidenceKey, type Finding, type Signal } from '../core/types';
 import { newId } from '../store/model';
 
 export function Inspector() {
@@ -71,6 +71,15 @@ function AccountPanel({ id }: { id: string }) {
           {inGroup && <span class="chip">รวมจาก {inGroup.members.length} รหัส</span>}
         </div>
       </div>
+
+      {a.meta && Object.keys(a.meta).length > 0 && (
+        <section class="stack tight">
+          <h3>ข้อมูลจากหัวเอกสาร Statement</h3>
+          <dl class="kv-list">
+            {Object.entries(a.meta).map(([k, v]) => (<><dt key={k}>{k}</dt><dd>{v}</dd></>))}
+          </dl>
+        </section>
+      )}
 
       {p && (
         <div class="grid cols-2 keep2" style="gap:8px">
@@ -278,6 +287,22 @@ function TxnPanel({ id }: { id: string }) {
         {t.reference && <><dt>เลขอ้างอิง</dt><dd>{t.reference}</dd></>}
         {t.balanceAfter !== undefined && <><dt>ยอดคงเหลือหลังรายการ</dt><dd>{fmtBaht(t.balanceAfter)}</dd></>}
       </dl>
+      {t.extra && Object.keys(t.extra).length > 0 && (
+        <section class="stack tight">
+          <h3>หลักฐานเสริมจาก Statement</h3>
+          <dl class="kv-list">
+            {(Object.keys(EVIDENCE_LABEL) as EvidenceKey[]).filter((k) => t.extra![k]).map((k) => (
+              <><dt key={'k' + k}>{EVIDENCE_LABEL[k]}</dt>
+                <dd key={'v' + k}>
+                  {k === 'ip' || k === 'atmId' || k === 'phone' ? (
+                    <a href="javascript:void(0)" title="ดูธุรกรรมอื่นที่มีค่านี้" onClick={(e) => { e.preventDefault(); go('/transactions', { q: t.extra![k]! }); }}>{t.extra![k]}</a>
+                  ) : t.extra![k]}
+                </dd></>
+            ))}
+          </dl>
+          <div class="tiny muted">IP และเลขเครื่องที่ซ้ำกันบ่งชี้ว่าใช้เครือข่ายหรืออุปกรณ์เดียวกันได้ แต่ IP ของผู้ให้บริการมือถือถูกใช้ร่วมกันหลายคน จึงไม่ใช่ข้อพิสูจน์ว่าเป็นบุคคลเดียวกัน</div>
+        </section>
+      )}
       {t.description && <div><div class="small muted">รายละเอียดตามต้นฉบับ</div><div style="white-space:pre-wrap;word-break:break-word">{t.description}</div></div>}
       <div class="row wrap">
         {t.mirrored && <span class="chip accent" title="รายการนี้ปรากฏใน Statement ของทั้งสองบัญชี และถูกรวมเป็นรายการเดียว">ยืนยันจาก 2 Statement</span>}

@@ -70,6 +70,9 @@ export async function buildWorkbook(
       { header: 'ไป', key: 'to', width: 34 }, { header: 'เลขบัญชีผู้รับ', key: 'toNo', width: 16 }, { header: 'ธนาคารผู้รับ', key: 'toBank', width: 14 },
       { header: 'จำนวนเงิน', key: 'amount', width: 15, fmt: MONEY }, { header: 'ชนิด', key: 'kind', width: 13 }, { header: 'ช่องทาง', key: 'channel', width: 14 },
       { header: 'รายละเอียดตามต้นฉบับ', key: 'desc', width: 50 }, { header: 'เลขอ้างอิง', key: 'ref', width: 16 }, { header: 'สถานที่/ตู้', key: 'loc', width: 22 },
+      { header: 'IP Address', key: 'ip', width: 16 }, { header: 'รหัสตู้/เครื่อง', key: 'atm', width: 16 }, { header: 'ธนาคารเจ้าของตู้/ช่องทาง', key: 'atmBank', width: 18 },
+      { header: 'รหัสสาขา', key: 'branch', width: 10 }, { header: 'ละติจูด', key: 'lat', width: 12 }, { header: 'ลองจิจูด', key: 'lng', width: 12 },
+      { header: 'เบอร์โทร', key: 'phone', width: 14 },
       { header: 'หมายเหตุ', key: 'flags', width: 30 }, { header: 'แหล่งที่มา (ไฟล์#แถว)', key: 'src', width: 40 },
     ]);
     for (const t of d.txns) {
@@ -77,11 +80,13 @@ export async function buildWorkbook(
         id: t.id, ts: dt(t.ts), tsBe: formatTs(t.ts, t.hasTime, true), hasTime: t.hasTime ? 'ใช่' : 'ไม่มี',
         from: lab(t.from), fromNo: acct(t.from), fromBank: bank(t.from), to: lab(t.to), toNo: acct(t.to), toBank: bank(t.to),
         amount: t.amount, kind: KIND_LABEL[t.kind], channel: t.channel ?? '', desc: t.description ?? '', ref: t.reference ?? '', loc: t.location ?? '',
+        ip: t.extra?.ip ?? '', atm: t.extra?.atmId ?? '', atmBank: t.extra?.atmBank ?? '', branch: t.extra?.branch ?? '',
+        lat: t.extra?.lat ?? '', lng: t.extra?.lng ?? '', phone: t.extra?.phone ?? '',
         flags: [t.mirrored && 'ยืนยัน 2 ฝั่ง', t.inferred && 'คู่บัญชีอนุมาน', ...(t.flags ?? []).map((f) => FLAG_LABEL[f] ?? f)].filter(Boolean).join('; '),
         src: t.sources.map((s) => `${st.files.find((f) => f.record.id === s.fileId)?.record.name ?? s.fileId}#${s.row}`).join(', '),
       });
     }
-    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 18 } };
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 25 } };
   }
 
   // ---- 3) โปรไฟล์บัญชี ----
@@ -115,7 +120,7 @@ export async function buildWorkbook(
     }
     ws.addRow([]);
     ws.addRow(['หมายเหตุ: องค์ประกอบลำดับการตรวจสอบเป็นค่าสัมพัทธ์ภายในคดี ไม่ใช่คะแนนความผิด · บทบาทเบื้องต้นได้จากโครงสร้างข้อมูลและต้องยืนยันด้วยหลักฐานอื่น']).font = { ...FONT, italic: true };
-    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 18 } };
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 25 } };
   }
 
   // ---- 4) คู่บัญชี ----

@@ -92,8 +92,8 @@ describe.skipIf(!have || !existsSync(resolve(dir, 'B3_ktb_encrypted.pdf')))('PDF
   it('ไม่ให้รหัส/รหัสผิด → PdfPasswordError; รหัสถูก → อ่านได้ตรงต้นทาง', async () => {
     const buf = readFileSync(resolve(dir, 'B3_ktb_encrypted.pdf'));
     const file = new File([buf], 'enc.pdf');
-    await expect(readStatementFile(file)).rejects.toMatchObject({ name: 'PdfPasswordError', wrong: false });
-    await expect(readStatementFile(file, { password: '9999' })).rejects.toMatchObject({ name: 'PdfPasswordError', wrong: true });
+    await expect(readStatementFile(file)).rejects.toMatchObject({ name: 'FilePasswordError', wrong: false });
+    await expect(readStatementFile(file, { password: '9999' })).rejects.toMatchObject({ name: 'FilePasswordError', wrong: true });
     const res = await readStatementFile(file, { password: '1234' });
     const m = detectMapping(res.tables[0]!);
     expectSameAsScenario(parseRows(res.tables[0]!, m, 'enc'), owners.B3!);

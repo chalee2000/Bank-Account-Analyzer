@@ -1,4 +1,4 @@
-import type { TxnKind, FileRecord } from '../core/types';
+import type { TxnKind, FileRecord, EvidenceKey, TxnExtra } from '../core/types';
 import type { YearMode } from '../core/thai';
 
 /** ตารางดิบที่อ่านจากไฟล์ (ยังไม่ตีความ) — แถวแรก ๆ อาจเป็นหัวเอกสารก่อนหัวตาราง */
@@ -14,6 +14,16 @@ export interface RawTable {
 }
 
 export type AmountMode = 'two-columns' | 'signed' | 'drcr-column' | 'infer-balance';
+
+/** คอลัมน์ของฝ่ายหนึ่งในรายการ (ต้นทางหรือปลายทาง) */
+export interface PartyCols {
+  account?: number;
+  name?: number;
+  bank?: number;
+}
+
+/** รูปแบบ statement ของธนาคารที่ระบบรู้จัก (ดู formats.ts) */
+export type FormatId = 'std-export' | 'from-to-statement' | 'baac-detail' | 'ktb-statement';
 
 export interface ColumnMapping {
   /** index ของแถวหัวตารางใน RawTable.rows (-1 = ไม่มีหัวตาราง) */
@@ -34,6 +44,18 @@ export interface ColumnMapping {
   location?: number;
   /** คอลัมน์ข้อความเพิ่มเติมที่ต่อท้ายรายละเอียด (เช่น ประเภทรายการ + รายละเอียด) */
   extra?: number[];
+  /**
+   * คอลัมน์ต้นทาง/ปลายทางแยกกัน: คู่บัญชี = ฝั่งตรงข้ามเจ้าของ statement
+   * (ขาเข้าใช้ฝั่ง "ต้นทาง" ขาออกใช้ฝั่ง "ปลายทาง")
+   */
+  cpFrom?: PartyCols;
+  cpTo?: PartyCols;
+  /** หาทิศทางเงินจากการมีข้อมูลฝั่งต้นทาง (=เข้า) หรือปลายทาง (=ออก) เมื่อจำนวนเงินมีคอลัมน์เดียวและไม่มีเครื่องหมาย */
+  directionFromParties?: boolean;
+  /** คอลัมน์หลักฐานเสริมรายแถว (IP, ตู้ ATM, พิกัด ฯลฯ) */
+  evidence?: Partial<Record<EvidenceKey, number>>;
+  /** รูปแบบ statement ที่ตรวจพบ — ใช้กำหนดวิธีจัดประเภทรายการและอ่านรายละเอียดเฉพาะธนาคาร */
+  format?: FormatId;
   amountMode: AmountMode;
   yearMode: YearMode;
   dayFirst: boolean;
@@ -63,6 +85,8 @@ export interface OwnerInfo {
   bank?: string;
   number: string;
   name?: string;
+  /** ข้อมูลเจ้าของบัญชีจากหัวเอกสาร (สาขา ที่อยู่ ฯลฯ) */
+  meta?: Record<string, string>;
 }
 
 /** บัญชีเจ้าของที่ตรวจพบจากหัวเอกสาร */
@@ -72,6 +96,11 @@ export interface OwnerSuggestion {
   bank?: string;
   /** ช่วงเวลา statement ที่ระบุในหัวเอกสาร (ข้อความดิบ) */
   period?: string;
+  meta?: Record<string, string>;
+  /** รูปแบบ statement ที่ตรวจพบ (แสดงให้ผู้ใช้เห็นว่าระบบรู้จักไฟล์นี้) */
+  formatLabel?: string;
+  /** หมายเหตุสำหรับผู้ใช้ เช่น ไฟล์มีหลายบัญชี */
+  notes?: string[];
 }
 
 export interface CounterpartyRef {
@@ -102,7 +131,9 @@ export interface StatementRow {
   balanceAfter?: number;
   cp: CounterpartyRef;
   /** วิธีที่ได้ทิศทาง */
-  directionSource: 'column' | 'sign' | 'drcr' | 'balance' | 'keyword';
+  directionSource: 'column' | 'sign' | 'drcr' | 'balance' | 'keyword' | 'parties';
+  /** หลักฐานเสริมจาก statement */
+  extra?: TxnExtra;
   flags: string[];
   /** ความมั่นใจต่ำสุดของเซลล์ที่ใช้ (OCR) */
   minConfidence?: number;
@@ -127,6 +158,10 @@ export interface ParseStats {
   noTime: number;
   inferredCounterparty: number;
   warnings: string[];
+  /** ข้อมูลประกอบที่ไม่ใช่คำเตือน (เช่น เติม 0 นำหน้าเลขบัญชี) */
+  notes: string[];
+  /** จำนวนรายการที่ไฟล์ระบุไว้ท้ายตาราง (เช่น "รวมทั้งสิ้น 298 รายการ") */
+  declaredRows?: number;
 }
 
 export interface ParseResult {

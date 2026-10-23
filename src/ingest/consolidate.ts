@@ -5,7 +5,7 @@
 //  4) ทำเป็นเส้นทางเงินทิศเดียว from → to
 // ฟังก์ชันนี้เป็น pure (ไม่มี DOM/IO) จึงรันซ้ำได้ทุกครั้งที่เพิ่ม/ลบไฟล์หรือยืนยันการรวมบัญชี
 
-import type { Account, AliasGroup, AnalysisSettings, Txn } from '../core/types';
+import type { Account, AliasGroup, AnalysisSettings, Txn, TxnExtra } from '../core/types';
 import {
   accountsCompatible, buildAccountId, cashAccountId, formatAccountNumber, isPseudoAccount,
   normalizeName, unknownAccountId, bankDisplay,
@@ -47,6 +47,13 @@ function parseId(id: string): { bank?: string; number: string; isName: boolean }
   const i = id.indexOf(':');
   const bank = id.slice(0, i);
   return { bank: bank === '?' ? undefined : bank, number: id.slice(i + 1), isName: false };
+}
+
+/** รายการ mirror มาจาก 2 statement — รวมหลักฐานเสริมของทั้งสองฝั่ง (ฝั่งผู้โอนมาก่อน) */
+function mergeExtra(a?: TxnExtra, b?: TxnExtra): TxnExtra | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return { ...b, ...a };
 }
 
 function bankCompat(a?: string, b?: string): boolean {
@@ -217,6 +224,7 @@ export function consolidate(
       reference: r.reference,
       location: r.location,
       balanceAfter: r.balanceAfter,
+      extra: r.extra,
       owners: [e.ownerId],
       sources: [{ fileId: e.fileId, row: r.row }],
       inferred: r.cp.inferred || undefined,
@@ -262,6 +270,7 @@ export function consolidate(
       channel: e.row.channel ?? m.row.channel,
       reference: e.row.reference ?? m.row.reference,
       location: e.row.location ?? m.row.location,
+      extra: mergeExtra(e.row.extra, m.row.extra),
       owners: [e.ownerId, m.ownerId],
       sources: [...base.sources, { fileId: m.fileId, row: m.row.row }],
       mirrored: true,
@@ -311,6 +320,7 @@ export function consolidate(
       channel: e.row.channel ?? m.row.channel,
       reference: e.row.reference ?? m.row.reference,
       location: e.row.location ?? m.row.location,
+      extra: mergeExtra(e.row.extra, m.row.extra),
       owners: [e.ownerId, m.ownerId],
       sources: [...base.sources, { fileId: m.fileId, row: m.row.row }],
       mirrored: true,
@@ -356,6 +366,7 @@ export function consolidate(
     a.hasStatement = true;
     if (info.name) a.name = info.name;
     if (info.bank) a.bank = info.bank;
+    if (info.meta) a.meta = info.meta;
   }
   for (const t of txns) {
     ensure(t.from);

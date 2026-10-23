@@ -4,8 +4,8 @@ import { addStoredFile, cs, notify, removeStoredFile } from '../../state';
 import { BANKS, bankDisplay, formatAccountNumber, normalizeAccountNumber } from '../../core/normalize';
 import { fmtBaht, fmtInt, formatThaiDate, formatThaiDateTime } from '../../core/thai';
 import { readStatementFile, type ReadResult } from '../../ingest';
-import { PdfPasswordError, UnsupportedFileError } from '../../ingest/errors';
-import { detectMapping, suggestOwner } from '../../ingest/detectColumns';
+import { FilePasswordError, UnsupportedFileError } from '../../ingest/errors';
+import { inspectTable, pickBestTable } from '../../ingest/detectColumns';
 import { parseRows } from '../../ingest/parseRows';
 import type { ColumnMapping, OwnerSuggestion, RawTable } from '../../ingest/types';
 import { MAPPING_FIELDS } from '../../ingest/types';
@@ -61,10 +61,9 @@ async function startReading(id: string) {
       onProgress: (p) => patchItem(id, { phase: p.phase, fraction: p.fraction }),
     });
     const templates = await listTemplates().catch(() => []);
-    const table = result.tables[0]!;
-    selectTable(id, result, 0, templates);
+    selectTable(id, result, pickBestTable(result.tables), templates);
   } catch (e) {
-    if (e instanceof PdfPasswordError) {
+    if (e instanceof FilePasswordError) {
       patchItem(id, { status: 'needs-password', error: e.wrong ? 'รหัสผ่านไม่ถูกต้อง ลองอีกครั้ง' : undefined });
     } else {
       patchItem(id, {
@@ -77,11 +76,13 @@ async function startReading(id: string) {
 
 function selectTable(id: string, result: ReadResult, idx: number, templates?: Awaited<ReturnType<typeof listTemplates>>) {
   const table = result.tables[idx]!;
-  let mapping = detectMapping(table);
+  const inspected = inspectTable(table);
+  let mapping = inspected.mapping;
+  // รูปแบบธนาคารที่ระบบรู้จักแม่นกว่าแม่แบบที่เคยจำไว้ — ใช้แม่แบบเฉพาะตารางที่ไม่รู้จัก
   const sig = headerSig(table.rows, mapping.headerRow);
-  const tpl = templates?.find((t) => t.key === sig);
+  const tpl = mapping.format ? undefined : templates?.find((t) => t.key === sig);
   if (tpl) mapping = { ...tpl.mapping, headerRow: mapping.headerRow };
-  const suggestion = suggestOwner(table.rows, mapping.headerRow);
+  const suggestion = inspected.owner;
   const guessedAcct = suggestion.number ? formatAccountNumber(suggestion.number) : '';
   patchItem(id, {
     status: 'ready',
@@ -165,7 +166,7 @@ export function ImportPage() {
         <Icon name="info" />
         <div class="small">
           <b>ข้อควรรู้:</b> ระบบไม่เดาเลขบัญชีหรือยอดเงินที่อ่านไม่ชัด — แถวที่ระบุวันที่ ยอด หรือทิศทางเงินไม่ได้จะถูกข้ามพร้อมเหตุผล ·
-          ไฟล์ .xls รุ่นเก่ายังไม่รองรับ (บันทึกเป็น .xlsx หรือ .csv ก่อน) · PDF ที่มีรหัสผ่านระบบจะถามรหัสผ่าน (ใช้ในเครื่องเท่านั้น)
+          ไฟล์ .xls รุ่นเก่ายังไม่รองรับ (บันทึกเป็น .xlsx หรือ .csv ก่อน) · PDF และ Excel ที่ตั้งรหัสผ่านระบบจะถามรหัสผ่าน (ใช้ในเครื่องเท่านั้น)
         </div>
       </div>
 
@@ -242,13 +243,13 @@ function QueueCard({ item }: { item: QueueItem }) {
           {item.status === 'imported' && <div class="small" style="color:var(--good)">นำเข้าเรียบร้อย</div>}
           {item.status === 'needs-password' && (
             <div class="row" style="margin-top:6px;max-width:420px">
-              <input class="input sm" type="password" placeholder="รหัสผ่าน PDF" value={pw} onInput={(e) => setPw((e.target as HTMLInputElement).value)}
+              <input class="input sm" type="password" placeholder="รหัสผ่านของไฟล์" value={pw} onInput={(e) => setPw((e.target as HTMLInputElement).value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') { patchItem(item.id, { password: pw }); void startReading(item.id); } }} />
               <button class="btn sm primary" onClick={() => { patchItem(item.id, { password: pw }); void startReading(item.id); }}>เปิดไฟล์</button>
               {item.error && <span class="small" style="color:var(--critical)">{item.error}</span>}
             </div>
           )}
-          {item.status === 'needs-password' && !item.error && <div class="tiny muted">PDF นี้มีรหัสผ่าน (ธนาคารมักใช้เลขบัตรประชาชนหรือวันเกิด) — ใช้ในเครื่องนี้เท่านั้น ไม่ถูกส่งออก</div>}
+          {item.status === 'needs-password' && !item.error && <div class="tiny muted">ไฟล์นี้ตั้งรหัสผ่านไว้ (PDF หรือ Excel) — รหัสใช้ถอดไฟล์ในเครื่องนี้เท่านั้น ไม่ถูกบันทึกหรือส่งออก</div>}
         </div>
         {(item.status === 'ready' || item.status === 'imported') && (
           <button class="btn sm ghost" onClick={() => patchItem(item.id, { open: !item.open })}>{item.open ? 'ซ่อน' : 'ตรวจสอบ'}</button>
@@ -316,7 +317,10 @@ function ReviewPanel({ item }: { item: QueueItem }) {
           balanceChecks: { checked: parsed.stats.balanceChecked, mismatches: parsed.stats.balanceMismatches },
           mappingSummary: JSON.stringify(mapping),
         },
-        owner: { bank: item.owner.bank || undefined, number: ownerNorm.number, name: item.owner.name.trim() || undefined },
+        owner: {
+          bank: item.owner.bank || undefined, number: ownerNorm.number, name: item.owner.name.trim() || undefined,
+          meta: item.suggestion?.meta,
+        },
         rows: parsed.rows,
         skipped: parsed.stats.skipped.slice(0, 500),
         mapping,
@@ -345,6 +349,11 @@ function ReviewPanel({ item }: { item: QueueItem }) {
         </Field>
       )}
       {(result.notes.length > 0 || (baseTable.notes?.length ?? 0) > 0) ? <div class="tiny muted">{[...result.notes, ...(baseTable.notes ?? [])].join(' · ')}</div> : null}
+      {item.suggestion?.formatLabel && (
+        <div class="row wrap"><span class="chip good"><Icon name="check" size={14} /> ตรวจพบรูปแบบ: {item.suggestion.formatLabel}</span>
+          <span class="tiny muted">ระบบจับคู่คอลัมน์ให้แล้ว — ตรวจตัวอย่างข้อมูลด้านล่างก่อนนำเข้า</span></div>
+      )}
+      {item.suggestion?.notes?.map((n, i) => <Notice kind="warn" key={i}>{n}</Notice>)}
 
       <section class="stack tight">
         <h3>1) บัญชีเจ้าของ Statement นี้</h3>
@@ -396,6 +405,12 @@ function ReviewPanel({ item }: { item: QueueItem }) {
             </Field>
           ))}
         </div>
+        {(mapping.cpFrom || mapping.cpTo) && (
+          <div class="tiny muted">
+            คู่บัญชีอ่านจากคอลัมน์ต้นทาง/ปลายทางแยกกัน (ขาเข้า = ต้นทาง, ขาออก = ปลายทาง)
+            {mapping.evidence && Object.keys(mapping.evidence).length > 0 ? ` · เก็บหลักฐานเสริม ${Object.keys(mapping.evidence).length} ชนิด (IP, ตู้ ATM, พิกัด ฯลฯ)` : ''}
+          </div>
+        )}
         <div class="row wrap">
           <label class="row small"><input type="checkbox" checked={mapping.cpFromDescription} onChange={(e) => setMap({ cpFromDescription: (e.target as HTMLInputElement).checked })} />
             อ่านเลขบัญชี/ชื่อ/ธนาคารคู่โอนจากข้อความรายละเอียด (เดา — ติดธง “อนุมาน”)</label>
@@ -453,6 +468,7 @@ function ReviewPanel({ item }: { item: QueueItem }) {
           <div class="card pad"><div class="tiny muted">ยอดคงเหลือต่อเนื่อง</div><span class="small">{parsed.stats.balanceChecked ? `${parsed.stats.balanceChecked - parsed.stats.balanceMismatches}/${parsed.stats.balanceChecked}` : 'ไม่มีข้อมูลตรวจ'}</span></div>
         </div>
         {parsed.stats.warnings.map((w, i) => <Notice kind="warn" key={i}>{w}</Notice>)}
+        {parsed.stats.notes.map((n, i) => <Notice kind="info" key={'n' + i}>{n}</Notice>)}
         {parsed.stats.noCounterparty > 0 && <Notice kind="info">{parsed.stats.noCounterparty} รายการไม่ระบุคู่บัญชี (จะเชื่อมในเครือข่ายไม่ได้) {parsed.stats.inferredCounterparty > 0 ? `· ${parsed.stats.inferredCounterparty} รายการได้คู่บัญชีจากการอ่านข้อความ` : ''}</Notice>}
         {parsed.stats.skipped.length > 0 && (
           <details>
