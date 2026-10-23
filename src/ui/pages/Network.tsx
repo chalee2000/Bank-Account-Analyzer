@@ -1,0 +1,214 @@
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import type { Core } from 'cytoscape';
+import { accounts, analysis, cs, derived, go, labelOf, notify, openInspector, patchCase, route, theme } from '../../state';
+import { fmtInt } from '../../core/thai';
+import { autoMinAmount, buildElements, layoutOptions, livePalette, loadCytoscape, makeStyle, type ColorBy } from '../network/graph';
+import { Empty, Field, Modal, Seg, saveBlob } from '../common';
+import { Icon } from '../icons';
+import { newId } from '../../store/model';
+import type { ManualNode } from '../../core/types';
+
+const MIN_OPTIONS = [0, 1_000, 10_000, 50_000, 100_000, 500_000, 1_000_000];
+
+export function NetworkPage() {
+  const res = analysis.value;
+  const d = derived.value;
+  const st = cs.value!;
+  const params = route.value.params;
+  const host = useRef<HTMLDivElement>(null);
+  const cyRef = useRef<Core | null>(null);
+  const [ready, setReady] = useState(false);
+  const [colorBy, setColorBy] = useState<ColorBy>('bank');
+  const [minAmount, setMinAmount] = useState(() => (analysis.value ? autoMinAmount(analysis.value) : 0));
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [showCash, setShowCash] = useState(true);
+  const [showManual, setShowManual] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(typeof window !== 'undefined' ? window.innerWidth > 720 : true);
+  const [modal, setModal] = useState<'node' | 'link' | null>(null);
+  const focus = params.get('focus');
+
+  const built = useMemo(() => {
+    if (!res || !d) return null;
+    return buildElements(d, res, st, {
+      minAmount, colorBy, showCash, showManual,
+      from: from ? Date.parse(from + 'T00:00:00Z') : undefined,
+      to: to ? Date.parse(to + 'T23:59:59Z') : undefined,
+    }, livePalette());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [res, d, st.manualNodes, st.manualLinks, minAmount, colorBy, showCash, showManual, from, to, theme.value]);
+
+  // สร้าง cytoscape
+  useEffect(() => {
+    let disposed = false;
+    let cy: Core | null = null;
+    void loadCytoscape().then((cytoscape) => {
+      if (disposed || !host.current) return;
+      cy = cytoscape({ container: host.current, elements: [], style: makeStyle(livePalette()), wheelSensitivity: 0.25, minZoom: 0.05, maxZoom: 4 });
+      cyRef.current = cy;
+      cy.on('tap', 'node', (ev) => {
+        const n = ev.target;
+        cy!.elements().removeClass('hl faded');
+        const nb = n.closedNeighborhood();
+        cy!.elements().not(nb).addClass('faded');
+        nb.addClass('hl');
+        const id = n.id() as string;
+        if (id.startsWith('m:')) return;
+        if (accounts.value[id]?.kind === 'account') openInspector({ kind: 'account', id });
+      });
+      cy.on('tap', (ev) => {
+        if (ev.target === cy) cy!.elements().removeClass('hl faded');
+      });
+      cy.on('tap', 'edge', (ev) => {
+        const e = ev.target;
+        if (e.hasClass('manual-link')) return;
+        go('/transactions', { acc: e.source().id(), to: e.target().id() });
+      });
+      cy.on('mouseover', 'edge', (ev) => { if (!ev.target.hasClass('faded')) ev.target.addClass('hl'); });
+      cy.on('mouseout', 'edge', (ev) => { ev.target.removeClass('hl'); });
+      setReady(true);
+    });
+    return () => { disposed = true; cyRef.current = null; setReady(false); cy?.destroy(); };
+  }, []);
+
+  // ใส่ข้อมูลและจัดวาง
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy || !ready || !built) return;
+    cy.batch(() => {
+      cy.elements().remove();
+      cy.add(built.elements);
+    });
+    if (built.nodeCount === 0) return;
+    const layout = cy.layout(layoutOptions(false) as never);
+    layout.one('layoutstop', () => {
+      if (focus) {
+        const ids = focus.split(',').filter((x) => cy.getElementById(x).nonempty());
+        if (ids.length) {
+          const col = cy.nodes().filter((n) => ids.includes(n.id()));
+          cy.elements().addClass('faded');
+          const nb = col.closedNeighborhood();
+          nb.removeClass('faded');
+          col.addClass('hl');
+          cy.fit(nb, 60);
+        }
+      }
+    });
+    layout.run();
+  }, [built, ready, focus]);
+
+  // เปลี่ยนธีม
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    const t = setTimeout(() => cy.style(makeStyle(livePalette()) as never), 30);
+    return () => clearTimeout(t);
+  }, [theme.value, ready]);
+
+  if (!res || !d) return <Empty title="ยังไม่มีข้อมูล" icon="network">นำเข้า Statement ก่อน</Empty>;
+
+  const relayout = () => cyRef.current?.layout(layoutOptions(true) as never).run();
+  const fit = () => cyRef.current?.fit(undefined, 40);
+  const exportPng = async () => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    const uri = cy.png({ output: 'base64uri', scale: 2, bg: livePalette().surface, full: true }) as string;
+    const blob = await (await fetch(uri)).blob();
+    await saveBlob(blob, `network_${st.meta.caseNumber ?? 'case'}.png`.replace(/[\\/:*?"<>|\s]/g, '_'));
+  };
+
+  return (
+    <div class="net-wrap">
+      <div class="net-canvas">
+        <div ref={host} style="position:absolute;inset:0" role="img" aria-label="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี" />
+        <div class="net-tools">
+          <button class="btn sm" onClick={() => setPanelOpen(!panelOpen)}><Icon name="filter" size={15} />{panelOpen ? 'ซ่อนตัวกรอง' : 'ตัวกรอง / เครื่องมือ'}</button>
+          {panelOpen && (
+            <div class="card stack" style="padding:12px;gap:10px">
+              <Field label="ระบายสีตาม">
+                <Seg value={colorBy} onChange={setColorBy} options={[{ value: 'bank', label: 'ธนาคาร' }, { value: 'community', label: 'ชุมชน' }, { value: 'component', label: 'กลุ่ม' }]} />
+              </Field>
+              <Field label="ยอดโอนรวมระหว่างคู่บัญชี ≥">
+                <select class="select sm" value={minAmount} onChange={(e) => setMinAmount(Number((e.target as HTMLSelectElement).value))}>
+                  {[...new Set([...MIN_OPTIONS, minAmount])].sort((a, b) => a - b).map((v) => <option value={v}>{v === 0 ? 'ทั้งหมด' : fmtInt(v) + ' บาท'}</option>)}
+                </select>
+              </Field>
+              <div class="row">
+                <Field label="ตั้งแต่"><input class="input sm" type="date" value={from} onChange={(e) => setFrom((e.target as HTMLInputElement).value)} /></Field>
+                <Field label="ถึง"><input class="input sm" type="date" value={to} onChange={(e) => setTo((e.target as HTMLInputElement).value)} /></Field>
+              </div>
+              <label class="row small"><input type="checkbox" checked={showCash} onChange={(e) => setShowCash((e.target as HTMLInputElement).checked)} />แสดงจุดเงินสด (ATM/สาขา)</label>
+              <label class="row small"><input type="checkbox" checked={showManual} onChange={(e) => setShowManual((e.target as HTMLInputElement).checked)} />แสดงข้อมูลที่เพิ่มเอง</label>
+              <div class="row wrap">
+                <button class="btn sm" onClick={fit}><Icon name="fit" size={15} />พอดีจอ</button>
+                <button class="btn sm" onClick={relayout}><Icon name="refresh" size={15} />จัดเรียงใหม่</button>
+                <button class="btn sm" onClick={exportPng}><Icon name="image" size={15} />PNG</button>
+              </div>
+              <div class="row wrap">
+                <button class="btn sm" onClick={() => setModal('node')}><Icon name="plus" size={15} />เพิ่มบุคคล/โทรศัพท์/ยานพาหนะ</button>
+                <button class="btn sm" onClick={() => setModal('link')} disabled={!built}><Icon name="link" size={15} />เพิ่มความสัมพันธ์</button>
+              </div>
+              {res.pairs.length > 1500 && minAmount > 0 && <div class="tiny" style="color:var(--warning)">เครือข่ายใหญ่ ({fmtInt(res.pairs.length)} คู่บัญชี) — แสดงเฉพาะคู่ที่ยอดตั้งแต่ {fmtInt(minAmount)} บาทเพื่อความเร็ว ปรับได้ด้านบน</div>}
+              <div class="tiny muted">{built ? `${fmtInt(built.nodeCount)} จุด · ${fmtInt(built.edgeCount)} เส้น` : ''} · แตะจุดเพื่อดูรายละเอียด แตะเส้นเพื่อดูธุรกรรม · กรอบหนา = มี Statement · ขอบสีฟ้าหนา = จุดตัดเครือข่าย</div>
+            </div>
+          )}
+        </div>
+        {built && built.legend.length > 0 && (
+          <div class="net-legend card" style="padding:8px 12px">
+            <div class="legend">{built.legend.map((l) => <span key={l.label}><i style={{ background: l.color }} />{l.label}</span>)}</div>
+          </div>
+        )}
+        {built?.nodeCount === 0 && <div class="empty" style="position:absolute;inset:0">ไม่มีจุดที่ตรงกับตัวกรอง</div>}
+      </div>
+      {modal === 'node' && <NodeModal onClose={() => setModal(null)} />}
+      {modal === 'link' && <LinkModal onClose={() => setModal(null)} />}
+    </div>
+  );
+}
+
+const NODE_TYPES: { value: ManualNode['type']; label: string }[] = [
+  { value: 'person', label: 'บุคคล' }, { value: 'phone', label: 'หมายเลขโทรศัพท์' }, { value: 'vehicle', label: 'ยานพาหนะ' },
+  { value: 'device', label: 'อุปกรณ์/IMEI/IP' }, { value: 'location', label: 'สถานที่' }, { value: 'other', label: 'อื่น ๆ' },
+];
+
+function NodeModal({ onClose }: { onClose: () => void }) {
+  const [label, setLabel] = useState('');
+  const [type, setType] = useState<ManualNode['type']>('person');
+  const [note, setNote] = useState('');
+  return (
+    <Modal title="เพิ่มจุดข้อมูลที่ได้จากหลักฐานอื่น" onClose={onClose} footer={<>
+      <button class="btn" onClick={onClose}>ยกเลิก</button>
+      <button class="btn primary" disabled={!label.trim()} onClick={async () => { await patchCase({ manualNodes: [...cs.value!.manualNodes, { id: newId('n_'), type, label: label.trim(), note: note.trim() || undefined }] }); notify('เพิ่มจุดแล้ว'); onClose(); }}>เพิ่ม</button>
+    </>}>
+      <div class="stack">
+        <Field label="ชนิด"><select class="select" value={type} onChange={(e) => setType((e.target as HTMLSelectElement).value as ManualNode['type'])}>{NODE_TYPES.map((t) => <option value={t.value}>{t.label}</option>)}</select></Field>
+        <Field label="ชื่อ / หมายเลข *"><input class="input" value={label} onInput={(e) => setLabel((e.target as HTMLInputElement).value)} autofocus /></Field>
+        <Field label="ที่มา / หมายเหตุ"><textarea class="textarea" rows={3} value={note} onInput={(e) => setNote((e.target as HTMLTextAreaElement).value)} placeholder="เช่น ได้จาก KYC เลขที่เอกสาร …" /></Field>
+        <div class="tiny muted">จุดที่เพิ่มเองเป็นข้อมูลที่ผู้สืบสวนบันทึกจากหลักฐานอื่น ระบบไม่ได้ตรวจสอบความถูกต้อง</div>
+      </div>
+    </Modal>
+  );
+}
+
+function LinkModal({ onClose }: { onClose: () => void }) {
+  const st = cs.value!;
+  const options = [
+    ...Object.values(accounts.value).filter((a) => a.kind === 'account').map((a) => ({ id: a.id, label: labelOf(a.id) })),
+    ...st.manualNodes.map((n) => ({ id: n.id, label: `[${NODE_TYPES.find((t) => t.value === n.type)?.label}] ${n.label}` })),
+  ];
+  const [a, setA] = useState('');
+  const [b, setB] = useState('');
+  const [label, setLabel] = useState('');
+  return (
+    <Modal title="เพิ่มความสัมพันธ์" onClose={onClose} footer={<>
+      <button class="btn" onClick={onClose}>ยกเลิก</button>
+      <button class="btn primary" disabled={!a || !b || a === b || !label.trim()} onClick={async () => { await patchCase({ manualLinks: [...cs.value!.manualLinks, { id: newId('l_'), a, b, label: label.trim() }] }); notify('เพิ่มความสัมพันธ์แล้ว'); onClose(); }}>เพิ่ม</button>
+    </>}>
+      <div class="stack">
+        <Field label="จาก"><select class="select" value={a} onChange={(e) => setA((e.target as HTMLSelectElement).value)}><option value="">— เลือก —</option>{options.map((o) => <option value={o.id}>{o.label}</option>)}</select></Field>
+        <Field label="ถึง"><select class="select" value={b} onChange={(e) => setB((e.target as HTMLSelectElement).value)}><option value="">— เลือก —</option>{options.map((o) => <option value={o.id}>{o.label}</option>)}</select></Field>
+        <Field label="ความสัมพันธ์ *"><input class="input" value={label} onInput={(e) => setLabel((e.target as HTMLInputElement).value)} placeholder="เช่น เจ้าของบัญชีตาม KYC, ใช้โทรศัพท์เครื่องนี้, พบร่วมกันใน CCTV" /></Field>
+      </div>
+    </Modal>
+  );
+}
