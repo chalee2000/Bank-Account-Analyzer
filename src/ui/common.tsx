@@ -1,6 +1,7 @@
 import type { ComponentChildren, JSX } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Icon } from './icons';
+import { bankColor } from './labels';
 
 export function Modal(props: {
   title: string;
@@ -31,7 +32,7 @@ export function Modal(props: {
 export function Empty(props: { title: string; children?: ComponentChildren; icon?: string; action?: ComponentChildren }) {
   return (
     <div class="empty">
-      <div style="opacity:.5;margin-bottom:8px"><Icon name={props.icon ?? 'file'} size={40} stroke={1.4} /></div>
+      <div class="empty-ico"><Icon name={props.icon ?? 'file'} size={34} stroke={1.6} /></div>
       <h2>{props.title}</h2>
       <div style="max-width:520px;margin:0 auto">{props.children}</div>
       {props.action && <div style="margin-top:14px">{props.action}</div>}
@@ -39,12 +40,16 @@ export function Empty(props: { title: string; children?: ComponentChildren; icon
   );
 }
 
-export function Kpi(props: { label: string; value: string; sub?: string; title?: string }) {
+export type Tone = 'violet' | 'blue' | 'teal' | 'pink' | 'indigo' | 'sky';
+export function Kpi(props: { label: string; value: string; sub?: string; title?: string; icon?: string; tone?: Tone; small?: boolean }) {
   return (
-    <div class="card kpi" title={props.title}>
-      <div class="label">{props.label}</div>
-      <div class="value">{props.value}</div>
-      {props.sub && <div class="sub">{props.sub}</div>}
+    <div class="card kpi" title={props.title} data-tone={props.tone}>
+      {props.icon && <span class="kpi-ico"><Icon name={props.icon} size={20} /></span>}
+      <div class="kpi-txt">
+        <div class="label">{props.label}</div>
+        <div class={props.small ? 'value sm' : 'value'}>{props.value}</div>
+        {props.sub && <div class="sub">{props.sub}</div>}
+      </div>
     </div>
   );
 }
@@ -52,7 +57,7 @@ export function Kpi(props: { label: string; value: string; sub?: string; title?:
 /** ความเด่นของสัญญาณ 1–3 แสดงเป็นจุด (ไม่ใช้สีแดง/เหลืองเพื่อไม่ให้สื่อถึงระดับความผิด) */
 export function Prominence({ n }: { n: 1 | 2 | 3 }) {
   return (
-    <span class="badge-dots" title={`ความเด่นของสัญญาณ ${n}/3 (ไม่ใช่ระดับความผิด)`} aria-label={`ความเด่น ${n} จาก 3`}>
+    <span class={'badge-dots' + (n === 3 ? ' p3' : '')} title={`ความเด่นของสัญญาณ ${n}/3 (ไม่ใช่ระดับความผิด)`} aria-label={`ความเด่น ${n} จาก 3`}>
       {'●'.repeat(n)}<span style="opacity:.25">{'●'.repeat(3 - n)}</span>
     </span>
   );
@@ -273,8 +278,14 @@ export function useSorted<T>(rows: T[], cols: Col<T>[], initialKey?: string, ini
   return { sorted, sortKey: key, sortDir: dir, onSort };
 }
 
-export function Pill({ children, kind }: { children: ComponentChildren; kind?: 'accent' | 'warn' | 'crit' }) {
+export function Pill({ children, kind }: { children: ComponentChildren; kind?: 'accent' | 'warn' | 'crit' | 'good' }) {
   return <span class={'chip' + (kind ? ' ' + kind : '')}>{children}</span>;
+}
+
+/** ชื่อธนาคารพร้อมจุดสีประจำธนาคาร */
+export function BankChip({ code, label }: { code?: string; label: string }) {
+  if (!label) return null;
+  return <span class="bank-chip" style={{ '--bank': bankColor(code) }}><i />{label}</span>;
 }
 
 export type { JSX };

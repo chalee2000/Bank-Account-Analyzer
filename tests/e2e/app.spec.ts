@@ -151,11 +151,11 @@ test('PDF ที่มีรหัสผ่าน: ถามรหัส → ร
   await page.getByRole('button', { name: 'สร้างและเริ่มนำเข้าไฟล์' }).click();
   await expect(page.getByText('ลากไฟล์ Statement มาวางที่นี่')).toBeVisible();
   await page.setInputFiles('input[type=file]', resolve(dir, 'B3_ktb_encrypted.pdf'));
-  await expect(page.getByText('PDF นี้มีรหัสผ่าน')).toBeVisible({ timeout: 20_000 });
-  await page.getByPlaceholder('รหัสผ่าน PDF').fill('0000');
+  await expect(page.getByText('ไฟล์นี้ตั้งรหัสผ่านไว้')).toBeVisible({ timeout: 20_000 });
+  await page.getByPlaceholder('รหัสผ่านของไฟล์').fill('0000');
   await page.getByRole('button', { name: 'เปิดไฟล์' }).click();
   await expect(page.getByText('รหัสผ่านไม่ถูกต้อง ลองอีกครั้ง')).toBeVisible({ timeout: 20_000 });
-  await page.getByPlaceholder('รหัสผ่าน PDF').fill('1234');
+  await page.getByPlaceholder('รหัสผ่านของไฟล์').fill('1234');
   await page.getByRole('button', { name: 'เปิดไฟล์' }).click();
   await expect(page.locator('button', { hasText: /^นำเข้า 8 รายการ$/ })).toBeEnabled({ timeout: 30_000 });
   await expect(page.getByPlaceholder('เช่น 123-4-56789-0')).toHaveValue('444-4-44444-3');

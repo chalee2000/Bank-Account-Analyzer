@@ -77,7 +77,7 @@ test('โหมดมืด: พื้นหลังและกราฟเป
   await expect(page.getByText('ภาพรวมคดี')).toBeVisible();
   await page.waitForTimeout(1200);
   const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-  expect(bg).toBe('rgb(14, 14, 13)');
+  expect(bg).toBe('rgb(12, 14, 32)');
   await page.screenshot({ path: shot('dark-dashboard') });
   await page.goto('/#/network');
   await page.waitForTimeout(2500);
@@ -86,4 +86,16 @@ test('โหมดมืด: พื้นหลังและกราฟเป
   await page.waitForTimeout(800);
   await page.screenshot({ path: shot('dark-patterns') });
   await ctx.close();
+});
+
+test('เปิดแอปค้างที่หน้าเครือข่ายก่อนวิเคราะห์เสร็จ: ผังต้องขึ้นเมื่อข้อมูลพร้อม', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'ทดลองด้วยข้อมูลสมมติ' }).click();
+  await page.waitForURL('**/#/dashboard');
+  await page.goto('/#/network');
+  await expect(page.locator('.net-canvas canvas').first()).toBeVisible({ timeout: 20_000 });
+  // โหลดใหม่ที่หน้านี้: คดีล่าสุดถูกกู้คืนและวิเคราะห์ใหม่ขณะที่หน้ากำลังแสดงอยู่
+  await page.reload();
+  await expect(page.locator('.net-canvas canvas').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('เจ้าของ Statement').first()).toBeVisible();
 });

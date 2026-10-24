@@ -4,7 +4,7 @@ import {
 } from '../../state';
 import type { TraceResult } from '../../core/types';
 import { fmtBaht, fmtInt, formatThaiDateTime, formatTime, formatTs } from '../../core/thai';
-import { Empty, Field, Notice, Seg, SimpleTable, useElementWidth } from '../common';
+import { Empty, Field, Kpi, Notice, Seg, SimpleTable, useElementWidth } from '../common';
 import { Icon } from '../icons';
 import { newId } from '../../store/model';
 
@@ -101,10 +101,10 @@ export function TracePage() {
       {result && edges.length > 0 && (
         <>
           <div class="grid cols-4 keep2">
-            <div class="card kpi"><div class="label">รายการที่ไล่ได้</div><div class="value">{fmtInt(edges.length)}</div><div class="sub">{fmtInt(new Set(edges.flatMap((e) => [e.from, e.to])).size)} บัญชี</div></div>
-            <div class="card kpi"><div class="label">จำนวนทอดสูงสุด</div><div class="value">{Math.max(...edges.map((e) => e.depth)) + 1}</div></div>
-            <div class="card kpi"><div class="label">ปลายทางเป็นเงินสด</div><div class="value">{fmtBaht(cashTotal)}</div><div class="sub">บาท (ถอน/ฝากเงินสด)</div></div>
-            <div class="card kpi"><div class="label">ช่วงเวลา</div><div class="value" style="font-size:16px">{formatTs(edges[0]!.ts, true)}</div><div class="sub">ถึง {formatTs(edges[edges.length - 1]!.ts, true)}</div></div>
+            <Kpi icon="trace" tone="violet" label="รายการที่ไล่ได้" value={fmtInt(edges.length)} sub={`${fmtInt(new Set(edges.flatMap((e) => [e.from, e.to])).size)} บัญชี`} />
+            <Kpi icon="network" tone="blue" label="จำนวนทอดสูงสุด" value={String(Math.max(...edges.map((e) => e.depth)) + 1)} />
+            <Kpi icon="bank" tone="pink" label="ปลายทางเป็นเงินสด" value={fmtBaht(cashTotal)} sub="บาท (ถอน/ฝากเงินสด)" />
+            <Kpi icon="timeline" tone="teal" label="ช่วงเวลา" small value={formatTs(edges[0]!.ts, true)} sub={`ถึง ${formatTs(edges[edges.length - 1]!.ts, true)}`} />
           </div>
           {result.truncated && <Notice kind="warn">เส้นทางมีจำนวนมากจึงแสดงเพียงบางส่วน — ตั้งยอดขั้นต่ำเพื่อลดจำนวน</Notice>}
 

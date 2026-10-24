@@ -85,10 +85,10 @@ export function DashboardPage() {
   return (
     <div class="stack">
       <div class="grid cols-4 keep2">
-        <Kpi label="บัญชีที่เกี่ยวข้อง" value={fmtInt(real.length)} sub={`มี Statement ${real.filter((a) => a.hasStatement).length} บัญชี`} />
-        <Kpi label="ธุรกรรม" value={fmtInt(txns.length)} sub={q.mirrorsMerged ? `รวมรายการสองฝั่ง ${fmtInt(q.mirrorsMerged)} รายการ` : undefined} />
-        <Kpi label="ช่วงเวลาข้อมูล" value={q.firstTs ? formatThaiDate(q.firstTs) : '–'} sub={q.lastTs ? `ถึง ${formatThaiDate(q.lastTs)}` : undefined} />
-        <Kpi label="มูลค่าธุรกรรมรวม" value={fmtBaht(totalAmount)} sub="บาท (ไม่นับค่าธรรมเนียม/ดอกเบี้ย)" />
+        <Kpi icon="accounts" tone="violet" label="บัญชีที่เกี่ยวข้อง" value={fmtInt(real.length)} sub={`มี Statement ${real.filter((a) => a.hasStatement).length} บัญชี`} />
+        <Kpi icon="list" tone="blue" label="ธุรกรรม" value={fmtInt(txns.length)} sub={q.mirrorsMerged ? `รวมรายการสองฝั่ง ${fmtInt(q.mirrorsMerged)} รายการ` : undefined} />
+        <Kpi icon="timeline" tone="teal" label="ช่วงเวลาข้อมูล" value={q.firstTs ? formatThaiDate(q.firstTs) : '–'} sub={q.lastTs ? `ถึง ${formatThaiDate(q.lastTs)}` : undefined} />
+        <Kpi icon="trace" tone="pink" label="มูลค่าธุรกรรมรวม" value={fmtBaht(totalAmount)} sub="บาท (ไม่นับค่าธรรมเนียม/ดอกเบี้ย)" />
       </div>
 
       {(q.balanceMismatch > 0 || q.skipped > 0 || q.noCounterparty > 0 || q.noTime > 0 || q.duplicatesRemoved > 0) && (

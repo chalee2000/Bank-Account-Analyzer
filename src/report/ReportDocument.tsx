@@ -9,7 +9,10 @@ import { fmtBaht, fmtDuration, fmtInt, fmtPct, formatThaiDate, formatThaiDateTim
 import { bucketLabels, bucketize, heatmapData } from '../ui/chartData';
 import { staticHeatmapSvg, staticLineSvg } from './staticCharts';
 import { FLAG_LABEL, KIND_LABEL } from '../ui/labels';
-import { PRINT_PALETTE } from '../ui/network/graph';
+
+/** สีชุดข้อมูลที่ 1–2 ของพาเลตต์ที่ผ่านการตรวจ (พิมพ์ได้ชัดทั้งสีและขาวดำ) */
+const SERIES_BLUE = '#2a78d6';
+const SERIES_ORANGE = '#eb6834';
 
 export interface ReportOptions {
   summary: boolean;
@@ -34,7 +37,7 @@ export interface ReportData {
   d: Derived;
   res: AnalysisResult;
   opts: ReportOptions;
-  net: { dataUrl: string; nodeCount: number; edgeCount: number; legend: { label: string; color: string }[] } | null;
+  net: { dataUrl: string; nodeCount: number; edgeCount: number; legend: { label: string; color: string }[]; summary?: string } | null;
   traces: { label: string; direction: 'forward' | 'backward'; result: TraceResult }[];
   generatedAt: number;
 }
@@ -74,8 +77,8 @@ export function ReportDocument({ data }: { data: ReportData }) {
     const b = bucketize(txns, (t) => (t.kind === 'cash_withdrawal' || t.kind === 'cash_deposit' ? 'cash' : 'x'), q.firstTs, q.lastTs);
     const lbl = bucketLabels(b.bucket);
     flowSvg = staticLineSvg(b.xs, [
-      { name: 'โอน/ชำระระหว่างบัญชี', color: PRINT_PALETTE.cat[0]!, values: b.values.get('x') ?? new Array(b.xs.length).fill(0) },
-      { name: 'ฝาก/ถอนเงินสด', color: PRINT_PALETTE.cat[1]!, values: b.values.get('cash') ?? new Array(b.xs.length).fill(0) },
+      { name: 'โอน/ชำระระหว่างบัญชี', color: SERIES_BLUE, values: b.values.get('x') ?? new Array(b.xs.length).fill(0) },
+      { name: 'ฝาก/ถอนเงินสด', color: SERIES_ORANGE, values: b.values.get('cash') ?? new Array(b.xs.length).fill(0) },
     ], lbl.xLabel);
     const hm = heatmapData(txns);
     if (hm.used > 0) heatSvg = staticHeatmapSvg(hm.grid);
@@ -234,7 +237,7 @@ export function ReportDocument({ data }: { data: ReportData }) {
           {data.net ? (
             <figure class="rpt-fig">
               <img src={data.net.dataUrl} alt="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี" style="width:100%;border:1px solid #ddd" />
-              <figcaption>รูปที่ 3 ผังเครือข่าย {fmtInt(data.net.nodeCount)} จุด {fmtInt(data.net.edgeCount)} เส้น — ขนาดจุดตามยอดเงินรวม ความหนาเส้นตามยอดโอน กรอบหนา = มี Statement วงกลมเส้นประ/สี่เหลี่ยม = จุดเงินสด
+              <figcaption>รูปที่ 3 ผังเครือข่าย {fmtInt(data.net.nodeCount)} จุด {fmtInt(data.net.edgeCount)} เส้น{data.net.summary ? ` (${data.net.summary})` : ''} — ขนาดจุดตามยอดเงินรวม ความหนาเส้นตามยอดโอน วงกลมใหญ่ที่มีวงขาว = เจ้าของ Statement วงกลมเส้นประ = คู่บัญชีอื่นที่รวมไว้ สี่เหลี่ยมเส้นประ = จุดเงินสด เส้นสีเขียว = เงินเข้าเจ้าของ เส้นสีส้ม = เงินออกจากเจ้าของ
                 {data.net.legend.length > 0 && <> · สี: {data.net.legend.map((l) => <span key={l.label} class="rpt-sw"><i style={{ background: l.color }} />{l.label}</span>)}</>}</figcaption>
             </figure>
           ) : <p class="rpt-note">ไม่มีข้อมูลเครือข่ายสำหรับแสดง</p>}

@@ -165,4 +165,13 @@ try {
   }
   writeFileSync(resolve(out, 'big_20000.csv'), '﻿' + lines.join('\n'), 'utf8');
 }
+// ---- ไฟล์สังเคราะห์ที่จำลองโครงสร้างของ statement จริง (กสิกร / ไฟล์ส่งออกมาตรฐาน / ธ.ก.ส. / กรุงไทย) ----
+{
+  const bank = await import('../tests/helpers/bankSamples');
+  const files: [string, () => Promise<File>][] = [
+    ['bank_kbank_like.xlsx', bank.kbankLikeFile], ['bank_std_export_like.xlsx', () => bank.stdExportLikeFile({ shuffle: true })],
+    ['bank_baac_like.xlsx', bank.baacLikeFile], ['bank_ktb_like.xlsx', bank.ktbLikeFile],
+  ];
+  for (const [name, make] of files) writeFileSync(resolve(out, name), Buffer.from(await (await make()).arrayBuffer()));
+}
 console.log('สร้างไฟล์ทดสอบที่', out);

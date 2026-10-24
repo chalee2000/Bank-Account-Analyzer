@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { readStatementFile } from '../src/ingest';
+import { FilePasswordError, UnsupportedFileError } from '../src/ingest/errors';
 import { inspectTable, pickBestTable } from '../src/ingest/detectColumns';
 import { parseRows } from '../src/ingest/parseRows';
 import { bankDisplay, formatAccountNumber } from '../src/core/normalize';
@@ -21,7 +22,17 @@ const hist = (xs: string[]) =>
 const iso = (ts: number) => new Date(ts).toISOString().slice(0, 19).replace('T', ' ');
 
 const name = basename(path);
-const res = await readStatementFile(new File([readFileSync(path)], name), { password, ocr: 'off' });
+const res = await readStatementFile(new File([readFileSync(path)], name), { password, ocr: 'off' }).catch((e: unknown) => {
+  if (e instanceof FilePasswordError) {
+    console.error(`${e.message} — ${e.wrong ? 'ตรวจรหัสแล้วลองใหม่' : 'ใส่รหัสเป็นอาร์กิวเมนต์ที่ 2'}: npm run check -- <ไฟล์> <รหัสผ่าน>`);
+    process.exit(1);
+  }
+  if (e instanceof UnsupportedFileError) {
+    console.error(e.message);
+    process.exit(1);
+  }
+  throw e;
+});
 const idx = pickBestTable(res.tables);
 const table = res.tables[idx]!;
 const { mapping, owner } = inspectTable(table);
@@ -30,7 +41,7 @@ const rows = parsed.rows;
 
 console.log(`ไฟล์        : ${name} (${res.kind}, ${(res.size / 1024).toFixed(0)} KB) SHA-256 ${res.sha256.slice(0, 16)}…`);
 console.log(`ตาราง/ชีต   : ${res.tables.map((t, i) => `${i === idx ? '▶' : ' '}${t.sheetName ?? i} (${t.rows.length} แถว)`).join(' | ')}`);
-console.log(`รูปแบบ      : ${owner.formatLabel ?? 'ไม่รู้จักรูปแบบนี้ — ใช้การเดาคอลัมน์ทั่วไป (ตรวจในหน้านำเข้าเข้าได้)'}`);
+console.log(`รูปแบบ      : ${owner.formatLabel ?? 'ไม่รู้จักรูปแบบนี้ — ใช้การเดาคอลัมน์ทั่วไป (ตรวจ/แก้การจับคู่คอลัมน์ได้ในหน้านำเข้า)'}`);
 console.log(`เจ้าของบัญชี : ${owner.bank ? bankDisplay(owner.bank) : 'ไม่ระบุธนาคาร'} | ${owner.number ? formatAccountNumber(owner.number) : 'ไม่พบเลขบัญชี'} | ${owner.name ?? '-'}`);
 if (owner.meta) console.log(`ข้อมูลบัญชี  : ${Object.entries(owner.meta).map(([k, v]) => `${k}=${v}`).join(' · ')}`);
 (owner.notes ?? []).forEach((n) => console.log(`ข้อสังเกต    : ${n}`));

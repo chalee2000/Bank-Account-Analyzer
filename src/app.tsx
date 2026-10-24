@@ -22,6 +22,8 @@ interface NavDef {
   path: string;
   label: string;
   icon: string;
+  /** สีไอคอนในเมนู (ตกแต่งเท่านั้น) */
+  tone: 'violet' | 'blue' | 'teal' | 'sky' | 'pink' | 'indigo';
   title: string;
   flush?: boolean;
   needsCase?: boolean;
@@ -30,17 +32,17 @@ interface NavDef {
 }
 
 const NAV: NavDef[] = [
-  { path: '/dashboard', label: 'ภาพรวม', icon: 'dashboard', title: 'ภาพรวมคดี', needsCase: true, render: () => <DashboardPage /> },
-  { path: '/import', label: 'นำเข้าไฟล์', icon: 'upload', title: 'นำเข้า Statement', needsCase: true, count: () => cs.value?.files.length, render: () => <ImportPage /> },
-  { path: '/accounts', label: 'บัญชี', icon: 'accounts', title: 'บัญชีและโปรไฟล์', needsCase: true, count: () => Object.values(derived.value?.accounts ?? {}).filter((a) => a.kind === 'account').length, render: () => <AccountsPage /> },
-  { path: '/transactions', label: 'ธุรกรรม', icon: 'list', title: 'ธุรกรรมรวม', needsCase: true, flush: true, count: () => derived.value?.txns.length, render: () => <TransactionsPage /> },
-  { path: '/patterns', label: 'รูปแบบ/สัญญาณ', icon: 'alert', title: 'รูปแบบและสัญญาณ', needsCase: true, count: () => analysis.value?.signals.filter((s) => s.prominence >= 2).length, render: () => <PatternsPage /> },
-  { path: '/trace', label: 'เส้นทางเงิน', icon: 'trace', title: 'เส้นทางเงิน (Money Trail)', needsCase: true, render: () => <TracePage /> },
-  { path: '/network', label: 'เครือข่าย', icon: 'network', title: 'ผังความเชื่อมโยง', needsCase: true, flush: true, render: () => <NetworkPage /> },
-  { path: '/timeline', label: 'ไทม์ไลน์', icon: 'timeline', title: 'Master Timeline', needsCase: true, render: () => <TimelinePage /> },
-  { path: '/findings', label: 'ผลวิเคราะห์', icon: 'findings', title: 'ผลวิเคราะห์ 4 ระดับ', needsCase: true, render: () => <FindingsPage /> },
-  { path: '/report', label: 'รายงาน', icon: 'report', title: 'รายงาน', needsCase: true, render: () => <ReportPage /> },
-  { path: '/settings', label: 'ตั้งค่า', icon: 'settings', title: 'ตั้งค่าและข้อมูล', render: () => <SettingsPage /> },
+  { path: '/dashboard', label: 'ภาพรวม', icon: 'dashboard', tone: 'violet', title: 'ภาพรวมคดี', needsCase: true, render: () => <DashboardPage /> },
+  { path: '/import', label: 'นำเข้าไฟล์', icon: 'upload', tone: 'blue', title: 'นำเข้า Statement', needsCase: true, count: () => cs.value?.files.length, render: () => <ImportPage /> },
+  { path: '/accounts', label: 'บัญชี', icon: 'accounts', tone: 'teal', title: 'บัญชีและโปรไฟล์', needsCase: true, count: () => Object.values(derived.value?.accounts ?? {}).filter((a) => a.kind === 'account').length, render: () => <AccountsPage /> },
+  { path: '/transactions', label: 'ธุรกรรม', icon: 'list', tone: 'sky', title: 'ธุรกรรมรวม', needsCase: true, flush: true, count: () => derived.value?.txns.length, render: () => <TransactionsPage /> },
+  { path: '/patterns', label: 'รูปแบบ/สัญญาณ', icon: 'alert', tone: 'pink', title: 'รูปแบบและสัญญาณ', needsCase: true, count: () => analysis.value?.signals.filter((s) => s.prominence >= 2).length, render: () => <PatternsPage /> },
+  { path: '/trace', label: 'เส้นทางเงิน', icon: 'trace', tone: 'violet', title: 'เส้นทางเงิน (Money Trail)', needsCase: true, render: () => <TracePage /> },
+  { path: '/network', label: 'เครือข่าย', icon: 'network', tone: 'indigo', title: 'ผังความเชื่อมโยง', needsCase: true, flush: true, render: () => <NetworkPage /> },
+  { path: '/timeline', label: 'ไทม์ไลน์', icon: 'timeline', tone: 'blue', title: 'Master Timeline', needsCase: true, render: () => <TimelinePage /> },
+  { path: '/findings', label: 'ผลวิเคราะห์', icon: 'findings', tone: 'teal', title: 'ผลวิเคราะห์ 4 ระดับ', needsCase: true, render: () => <FindingsPage /> },
+  { path: '/report', label: 'รายงาน', icon: 'report', tone: 'pink', title: 'รายงาน', needsCase: true, render: () => <ReportPage /> },
+  { path: '/settings', label: 'ตั้งค่า', icon: 'settings', tone: 'indigo', title: 'ตั้งค่าและข้อมูล', render: () => <SettingsPage /> },
 ];
 
 export function App() {
@@ -92,13 +94,13 @@ export function App() {
             {st.meta.caseNumber && <span class="ellipsis" style="display:block;opacity:.7">{st.meta.caseNumber}</span>}
           </div>
         )}
-        <a class="nav-item" href="#/" aria-current={r.path === '/' ? 'page' : undefined}><Icon name="file" /><span class="lbl">คดีทั้งหมด</span></a>
+        <a class="nav-item" data-tone="sky" href="#/" aria-current={r.path === '/' ? 'page' : undefined}><Icon name="file" /><span class="lbl">คดีทั้งหมด</span></a>
         <div class="nav-sep" />
         {NAV.filter((n) => n.path !== '/settings').map((n) => {
           const c = st ? n.count?.() : undefined;
           return (
             <a
-              key={n.path} class="nav-item" href={'#' + n.path} title={n.label}
+              key={n.path} class="nav-item" href={'#' + n.path} title={n.label} data-tone={n.tone}
               aria-current={r.path === n.path ? 'page' : undefined}
               style={!st ? 'opacity:.4;pointer-events:none' : undefined}
             >
@@ -108,7 +110,7 @@ export function App() {
           );
         })}
         <div class="nav-sep" />
-        <a class="nav-item" href="#/settings" aria-current={r.path === '/settings' ? 'page' : undefined}><Icon name="settings" /><span class="lbl">ตั้งค่าและข้อมูล</span></a>
+        <a class="nav-item" data-tone="indigo" href="#/settings" aria-current={r.path === '/settings' ? 'page' : undefined}><Icon name="settings" /><span class="lbl">ตั้งค่าและข้อมูล</span></a>
         <div class="nav-foot">
           <Icon name="lock" size={13} /> ประมวลผลในเครื่องนี้ทั้งหมด<br />ไฟล์ไม่ถูกส่งออกไปที่ใด
         </div>

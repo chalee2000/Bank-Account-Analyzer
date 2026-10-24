@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Core } from 'cytoscape';
 import { accounts, analysis, cs, derived, go, labelOf, notify, openInspector, patchCase, route, theme } from '../../state';
 import { fmtInt } from '../../core/thai';
-import { autoMinAmount, buildElements, layoutOptions, livePalette, loadCytoscape, makeStyle, type ColorBy } from '../network/graph';
+import { autoMinAmount, buildElements, fitInView, layoutOptions, livePalette, loadCytoscape, makeStyle, ownerRing, type ColorBy, type Insets, type LegendItem, type Scope } from '../network/graph';
 import { Empty, Field, Modal, Seg, saveBlob } from '../common';
 import { Icon } from '../icons';
 import { newId } from '../../store/model';
@@ -16,10 +16,15 @@ export function NetworkPage() {
   const st = cs.value!;
   const params = route.value.params;
   const host = useRef<HTMLDivElement>(null);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  const legendRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const [ready, setReady] = useState(false);
-  const [colorBy, setColorBy] = useState<ColorBy>('bank');
-  const [minAmount, setMinAmount] = useState(() => (analysis.value ? autoMinAmount(analysis.value) : 0));
+  const [scope, setScope] = useState<Scope>('core');
+  const [topPerOwner, setTopPerOwner] = useState(12);
+  const [colorBy, setColorBy] = useState<ColorBy>('role');
+  const [minAmount, setMinAmount] = useState(0);
+  const [allMin, setAllMin] = useState(() => (analysis.value ? autoMinAmount(analysis.value) : 0));
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [showCash, setShowCash] = useState(true);
@@ -31,15 +36,27 @@ export function NetworkPage() {
   const built = useMemo(() => {
     if (!res || !d) return null;
     return buildElements(d, res, st, {
-      minAmount, colorBy, showCash, showManual,
+      scope, topPerOwner, minAmount: scope === 'all' ? allMin : minAmount, colorBy, showCash, showManual,
+      focus: focus ? focus.split(',').filter(Boolean) : undefined,
       from: from ? Date.parse(from + 'T00:00:00Z') : undefined,
       to: to ? Date.parse(to + 'T23:59:59Z') : undefined,
     }, livePalette());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [res, d, st.manualNodes, st.manualLinks, minAmount, colorBy, showCash, showManual, from, to, theme.value]);
+  }, [res, d, st.manualNodes, st.manualLinks, scope, topPerOwner, minAmount, allMin, colorBy, showCash, showManual, from, to, focus, theme.value]);
 
-  // สร้าง cytoscape
+  /** พื้นที่ที่แผงเครื่องมือ/คำอธิบายสีลอยทับ — ใช้เว้นขอบตอนจัดผังให้พอดี (จอแคบ: แผงเต็มความกว้าง จึงเว้นด้านบนแทน) */
+  const viewInsets = (): Insets => {
+    const w = host.current?.clientWidth ?? 1000;
+    const tools = toolsRef.current;
+    const legendH = (legendRef.current?.offsetHeight ?? 0) + 24;
+    if (w < 720) return { top: tools ? Math.min(tools.offsetHeight + 16, 320) : 16, right: 12, bottom: legendH, left: 12 };
+    return { top: 16, right: 16, bottom: legendH, left: (tools?.offsetWidth ?? 0) + 28 };
+  };
+
+  // สร้าง cytoscape — ต้องรอให้ข้อมูลพร้อม (host ถูก render) ไม่เช่นนั้นเมื่อเปิดหน้านี้ก่อนวิเคราะห์เสร็จจะไม่มีผังขึ้นเลย
+  const hasData = !!res && !!d;
   useEffect(() => {
+    if (!hasData) return;
     let disposed = false;
     let cy: Core | null = null;
     void loadCytoscape().then((cytoscape) => {
@@ -54,8 +71,11 @@ export function NetworkPage() {
         nb.addClass('hl');
         const id = n.id() as string;
         if (id.startsWith('m:')) return;
+        if (id.startsWith('agg:')) { go('/transactions', { acc: n.data('owner') as string }); return; }
         if (accounts.value[id]?.kind === 'account') openInspector({ kind: 'account', id });
       });
+      cy.on('mouseover', 'node', (ev) => { ev.target.addClass('hov'); });
+      cy.on('mouseout', 'node', (ev) => { ev.target.removeClass('hov'); });
       cy.on('tap', (ev) => {
         if (ev.target === cy) cy!.elements().removeClass('hl faded');
       });
@@ -69,7 +89,7 @@ export function NetworkPage() {
       setReady(true);
     });
     return () => { disposed = true; cyRef.current = null; setReady(false); cy?.destroy(); };
-  }, []);
+  }, [hasData]);
 
   // ใส่ข้อมูลและจัดวาง
   useEffect(() => {
@@ -80,7 +100,7 @@ export function NetworkPage() {
       cy.add(built.elements);
     });
     if (built.nodeCount === 0) return;
-    const layout = cy.layout(layoutOptions(false) as never);
+    const layout = cy.layout(layoutOptions(built.nodeCount, false, ownerRing(built.elements)) as never);
     layout.one('layoutstop', () => {
       if (focus) {
         const ids = focus.split(',').filter((x) => cy.getElementById(x).nonempty());
@@ -90,12 +110,23 @@ export function NetworkPage() {
           const nb = col.closedNeighborhood();
           nb.removeClass('faded');
           col.addClass('hl');
-          cy.fit(nb, 60);
+          fitInView(cy, viewInsets(), nb);
+          return;
         }
       }
+      fitInView(cy, viewInsets());
     });
     layout.run();
   }, [built, ready, focus]);
+
+  // เปิด/ปิดแผงเครื่องมือแล้วจัดผังให้พอดีพื้นที่ใหม่
+  const firstPanel = useRef(true);
+  useEffect(() => {
+    if (firstPanel.current) { firstPanel.current = false; return; }
+    const cy = cyRef.current;
+    if (cy && ready) fitInView(cy, viewInsets());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelOpen]);
 
   // เปลี่ยนธีม
   useEffect(() => {
@@ -107,8 +138,8 @@ export function NetworkPage() {
 
   if (!res || !d) return <Empty title="ยังไม่มีข้อมูล" icon="network">นำเข้า Statement ก่อน</Empty>;
 
-  const relayout = () => cyRef.current?.layout(layoutOptions(true) as never).run();
-  const fit = () => cyRef.current?.fit(undefined, 40);
+  const relayout = () => cyRef.current?.layout(layoutOptions(built?.nodeCount ?? 0, true, built ? ownerRing(built.elements) : []) as never).run();
+  const fit = () => { if (cyRef.current) fitInView(cyRef.current, viewInsets()); };
   const exportPng = async () => {
     const cy = cyRef.current;
     if (!cy) return;
@@ -121,18 +152,29 @@ export function NetworkPage() {
     <div class="net-wrap">
       <div class="net-canvas">
         <div ref={host} style="position:absolute;inset:0" role="img" aria-label="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี" />
-        <div class="net-tools">
+        <div class="net-tools" ref={toolsRef}>
           <button class="btn sm" onClick={() => setPanelOpen(!panelOpen)}><Icon name="filter" size={15} />{panelOpen ? 'ซ่อนตัวกรอง' : 'ตัวกรอง / เครื่องมือ'}</button>
           {panelOpen && (
             <div class="card stack" style="padding:12px;gap:10px">
+              <Field label="มุมมอง">
+                <Seg value={scope} onChange={setScope} options={[{ value: 'core', label: 'แกนหลัก' }, { value: 'all', label: 'ทุกบัญชี' }]} />
+              </Field>
               <Field label="ระบายสีตาม">
-                <Seg value={colorBy} onChange={setColorBy} options={[{ value: 'bank', label: 'ธนาคาร' }, { value: 'community', label: 'ชุมชน' }, { value: 'component', label: 'กลุ่ม' }]} />
+                <Seg value={colorBy} onChange={setColorBy} options={[{ value: 'role', label: 'บทบาท' }, { value: 'bank', label: 'ธนาคาร' }, { value: 'community', label: 'ชุมชน' }]} />
               </Field>
-              <Field label="ยอดโอนรวมระหว่างคู่บัญชี ≥">
-                <select class="select sm" value={minAmount} onChange={(e) => setMinAmount(Number((e.target as HTMLSelectElement).value))}>
-                  {[...new Set([...MIN_OPTIONS, minAmount])].sort((a, b) => a - b).map((v) => <option value={v}>{v === 0 ? 'ทั้งหมด' : fmtInt(v) + ' บาท'}</option>)}
-                </select>
-              </Field>
+              {scope === 'core' ? (
+                <Field label="คู่บัญชีที่แสดงต่อเจ้าของ (ยอดสูงสุด)">
+                  <select class="select sm" value={topPerOwner} onChange={(e) => setTopPerOwner(Number((e.target as HTMLSelectElement).value))}>
+                    {[6, 12, 25, 50, 100].map((v) => <option value={v}>{v} บัญชี</option>)}
+                  </select>
+                </Field>
+              ) : (
+                <Field label="ยอดโอนรวมระหว่างคู่บัญชี ≥">
+                  <select class="select sm" value={allMin} onChange={(e) => setAllMin(Number((e.target as HTMLSelectElement).value))}>
+                    {[...new Set([...MIN_OPTIONS, allMin])].sort((a, b) => a - b).map((v) => <option value={v}>{v === 0 ? 'ทั้งหมด' : fmtInt(v) + ' บาท'}</option>)}
+                  </select>
+                </Field>
+              )}
               <div class="row">
                 <Field label="ตั้งแต่"><input class="input sm" type="date" value={from} onChange={(e) => setFrom((e.target as HTMLInputElement).value)} /></Field>
                 <Field label="ถึง"><input class="input sm" type="date" value={to} onChange={(e) => setTo((e.target as HTMLInputElement).value)} /></Field>
@@ -148,14 +190,15 @@ export function NetworkPage() {
                 <button class="btn sm" onClick={() => setModal('node')}><Icon name="plus" size={15} />เพิ่มบุคคล/โทรศัพท์/ยานพาหนะ</button>
                 <button class="btn sm" onClick={() => setModal('link')} disabled={!built}><Icon name="link" size={15} />เพิ่มความสัมพันธ์</button>
               </div>
-              {res.pairs.length > 1500 && minAmount > 0 && <div class="tiny" style="color:var(--warning)">เครือข่ายใหญ่ ({fmtInt(res.pairs.length)} คู่บัญชี) — แสดงเฉพาะคู่ที่ยอดตั้งแต่ {fmtInt(minAmount)} บาทเพื่อความเร็ว ปรับได้ด้านบน</div>}
-              <div class="tiny muted">{built ? `${fmtInt(built.nodeCount)} จุด · ${fmtInt(built.edgeCount)} เส้น` : ''} · แตะจุดเพื่อดูรายละเอียด แตะเส้นเพื่อดูธุรกรรม · กรอบหนา = มี Statement · ขอบสีฟ้าหนา = จุดตัดเครือข่าย</div>
+              {scope === 'all' && res.pairs.length > 1500 && allMin > 0 && <div class="tiny" style="color:var(--warning)">เครือข่ายใหญ่ ({fmtInt(res.pairs.length)} คู่บัญชี) — แสดงเฉพาะคู่ที่ยอดตั้งแต่ {fmtInt(allMin)} บาทเพื่อความเร็ว ปรับได้ด้านบน</div>}
+              {built && <div class="small secondary">{built.summary}</div>}
+              <div class="tiny muted">{built ? `${fmtInt(built.nodeCount)} จุด · ${fmtInt(built.edgeCount)} เส้น` : ''} · แตะจุดเพื่อดูรายละเอียด แตะเส้นเพื่อดูธุรกรรม · แตะจุดเส้นประเพื่อดูธุรกรรมของคู่บัญชีที่รวมไว้ · ชี้ที่จุดเพื่ออ่านชื่อเต็ม · ขนาดจุดตามยอดเงินรวม ความหนาเส้นตามยอดโอน</div>
             </div>
           )}
         </div>
         {built && built.legend.length > 0 && (
-          <div class="net-legend card" style="padding:8px 12px">
-            <div class="legend">{built.legend.map((l) => <span key={l.label}><i style={{ background: l.color }} />{l.label}</span>)}</div>
+          <div class="net-legend card" ref={legendRef} style="padding:8px 12px">
+            <div class="legend">{built.legend.map((l) => <span key={l.label}><Swatch item={l} />{l.label}</span>)}</div>
           </div>
         )}
         {built?.nodeCount === 0 && <div class="empty" style="position:absolute;inset:0">ไม่มีจุดที่ตรงกับตัวกรอง</div>}
@@ -164,6 +207,10 @@ export function NetworkPage() {
       {modal === 'link' && <LinkModal onClose={() => setModal(null)} />}
     </div>
   );
+}
+
+function Swatch({ item }: { item: LegendItem }) {
+  return <i class={'sw ' + item.shape} style={{ '--c': item.color }} />;
 }
 
 const NODE_TYPES: { value: ManualNode['type']; label: string }[] = [

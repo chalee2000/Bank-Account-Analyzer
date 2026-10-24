@@ -2,13 +2,14 @@ import { useMemo, useState } from 'preact/hooks';
 import { analysis, derived, inspector, labelOf, openInspector } from '../../state';
 import { bankDisplay, formatAccountNumber } from '../../core/normalize';
 import { fmtBaht, fmtDuration, fmtInt, fmtPct } from '../../core/thai';
-import { Empty, Pill, VTable, useDebounced, useSorted, type Col } from '../common';
+import { BankChip, Empty, Pill, VTable, useDebounced, useSorted, type Col } from '../common';
 
 interface Row {
   id: string;
   label: string;
   number: string;
   bank: string;
+  bankCode: string;
   hasStatement: boolean;
   totalIn: number;
   totalOut: number;
@@ -44,7 +45,7 @@ export function AccountsPage() {
       .map((a) => {
         const p = res.profiles[a.id];
         return {
-          id: a.id, label: labelOf(a.id, false), number: a.number ? formatAccountNumber(a.number) : '', bank: a.bank ? bankDisplay(a.bank) : '',
+          id: a.id, label: labelOf(a.id, false), number: a.number ? formatAccountNumber(a.number) : '', bank: a.bank ? bankDisplay(a.bank) : '', bankCode: a.bank ?? '',
           hasStatement: a.hasStatement, totalIn: p?.totalIn ?? 0, totalOut: p?.totalOut ?? 0, net: p?.net ?? 0, flow: p?.flowThrough ?? null,
           inCount: p?.inCount ?? 0, outCount: p?.outCount ?? 0, senders: p?.uniqueSenders ?? 0, receivers: p?.uniqueReceivers ?? 0,
           holding: p?.holding.medianMs ?? null, signals: sigCount.get(a.id) ?? 0, score: score.get(a.id) ?? 0,
@@ -60,8 +61,8 @@ export function AccountsPage() {
   const cols: Col<Row>[] = [
     { key: 'label', label: 'บัญชี', width: 230, sortable: true, value: (r) => r.label, render: (r) => <span title={r.label}>{r.label}</span> },
     { key: 'number', label: 'เลขที่บัญชี', width: 130, sortable: true, value: (r) => r.number },
-    { key: 'bank', label: 'ธนาคาร', width: 110, sortable: true, value: (r) => r.bank },
-    { key: 'stmt', label: 'Statement', width: 90, sortable: true, value: (r) => (r.hasStatement ? 1 : 0), render: (r) => (r.hasStatement ? <Pill kind="accent">มี</Pill> : <span class="muted">ไม่มี</span>) },
+    { key: 'bank', label: 'ธนาคาร', width: 120, sortable: true, value: (r) => r.bank, render: (r) => <BankChip code={r.bankCode} label={r.bank} /> },
+    { key: 'stmt', label: 'Statement', width: 90, sortable: true, value: (r) => (r.hasStatement ? 1 : 0), render: (r) => (r.hasStatement ? <Pill kind="good">มี</Pill> : <span class="muted">ไม่มี</span>) },
     { key: 'in', label: 'เงินเข้า', width: 120, num: true, sortable: true, value: (r) => r.totalIn, render: (r) => fmtBaht(r.totalIn) },
     { key: 'out', label: 'เงินออก', width: 120, num: true, sortable: true, value: (r) => r.totalOut, render: (r) => fmtBaht(r.totalOut) },
     { key: 'net', label: 'สุทธิ', width: 120, num: true, sortable: true, value: (r) => r.net, render: (r) => fmtBaht(r.net) },

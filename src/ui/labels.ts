@@ -11,6 +11,14 @@ export const KIND_LABEL: Record<TxnKind, string> = {
   other: 'อื่น ๆ',
 };
 
+/** สีประจำธนาคาร ใช้เป็นจุดสีข้างชื่อธนาคารเท่านั้น (ชื่ออยู่ข้างจุดเสมอ จึงไม่พึ่งสีอย่างเดียว) — ไม่ใช่สีแทนค่าในกราฟ */
+const BANK_COLOR: Record<string, string> = {
+  KBANK: '#1aa34a', SCB: '#6a3fbf', KTB: '#1ba5e0', BBL: '#1e3fae', BAY: '#e6a700', TTB: '#f2711c', GSB: '#e0408f', BAAC: '#0f9d7a',
+  GHB: '#e8590c', UOB: '#2563eb', CIMBT: '#b91c1c', LHBANK: '#0ea5e9', TISCO: '#d97706', KKP: '#475569', ICBC: '#dc2626',
+  TRUEMONEY: '#f97316', PROMPTPAY: '#1d4ed8',
+};
+export const bankColor = (code: string | undefined): string => (code && BANK_COLOR[code]) || '#8b90a8';
+
 export const FLAG_LABEL: Record<string, string> = {
   balance_mismatch: 'ยอดคงเหลือไม่ต่อเนื่องที่รายการนี้',
   ambiguous_mirror: 'การจับคู่สองฝั่ง (mirror) กำกวม มีหลายรายการที่เป็นไปได้',

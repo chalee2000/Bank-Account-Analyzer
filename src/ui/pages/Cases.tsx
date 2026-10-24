@@ -3,7 +3,7 @@ import { buildDemoCase } from '../../demo';
 import { caseList, createCase, cs, go, notify, openCase, removeCase, replaceCaseState } from '../../state';
 import { formatThaiDate } from '../../core/thai';
 import { importCase, inspectCaseFile, WrongPassphraseError } from '../../store/caseFile';
-import { Empty, Field, Modal } from '../common';
+import { BankChip, Empty, Field, Modal } from '../common';
 import { Icon } from '../icons';
 
 export function CasesPage() {
@@ -39,6 +39,20 @@ export function CasesPage() {
 
   return (
     <div class="stack" style="max-width:1000px">
+      <section class="hero">
+        <div class="hero-txt">
+          <h1>วิเคราะห์การเงินเชิงสืบสวน</h1>
+          <p>นำเข้า Statement หลายบัญชี ไล่เส้นทางเงิน ดูความเชื่อมโยงในผังเครือข่าย แล้วจัดทำรายงานประกอบการสืบสวน — ประมวลผลในเครื่องนี้ทั้งหมด</p>
+          <div class="row wrap hero-chips">
+            <span class="hero-chip">CSV · Excel · PDF · รูปสแกน (OCR)</span>
+            <span class="hero-chip">Excel ที่ตั้งรหัสผ่านได้</span>
+          </div>
+          <div class="row wrap hero-banks" aria-label="รูปแบบ Statement ที่ระบบรู้จัก">
+            <span class="small">รู้จักรูปแบบ Statement ของ</span>
+            <BankChip code="KBANK" label="กสิกรไทย" /><BankChip code="SCB" label="ไทยพาณิชย์" /><BankChip code="KTB" label="กรุงไทย" /><BankChip code="BAAC" label="ธ.ก.ส." />
+          </div>
+        </div>
+      </section>
       <div class="notice">
         <Icon name="shield" />
         <div>

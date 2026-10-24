@@ -50,7 +50,7 @@ export function ReportPage() {
     if (!res || !d || !opts.network) { setNet(null); return; }
     let cancelled = false;
     setNetBusy(true);
-    renderNetworkImage(d, res, st, { minAmount: 0, colorBy: 'bank', showCash: true, showManual: true })
+    renderNetworkImage(d, res, st, { scope: 'core', topPerOwner: 12, colorBy: 'role', showCash: true, showManual: true })
       .then((r) => { if (!cancelled) setNet(r); })
       .catch((e) => { console.error(e); if (!cancelled) setNet(null); })
       .finally(() => !cancelled && setNetBusy(false));
