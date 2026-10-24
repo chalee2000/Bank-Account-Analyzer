@@ -55,9 +55,11 @@
 
 ### รันในเครื่อง
 
-ต้องมี Node.js 20+
+ต้องมี **Git** และ **Node.js 22 LTS ขึ้นไป** (เครื่องมือ build ต้องการ Node 20.19+ ส่วนชุดทดสอบต้องการ 22.12+) — ถ้ายังไม่มี Node.js ให้ติดตั้งรุ่น LTS จาก https://nodejs.org แล้ว **ปิดและเปิด Command Prompt / Terminal ใหม่** ก่อนรันคำสั่งด้านล่าง (ตรวจด้วย `node -v` และ `npm -v` ต้องขึ้นเลขเวอร์ชัน)
 
 ```bash
+git clone https://github.com/chalee2000/Bank-Account-Analyzer.git
+cd Bank-Account-Analyzer
 npm install
 npm run dev          # http://localhost:5173  (พัฒนา)
 npm run build        # สร้างไฟล์สถิตที่ dist/
