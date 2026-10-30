@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import type { Core } from 'cytoscape';
-import { accounts, analysis, cs, derived, go, labelOf, notify, openInspector, patchCase, route, theme } from '../../state';
+import type { Core, EventObject } from 'cytoscape';
+import { accounts, analysis, cs, derived, go, labelOf, notify, openInspector, patchCase, route, setAccountNote, theme } from '../../state';
 import { fmtInt } from '../../core/thai';
-import { autoMinAmount, buildElements, fitInView, layoutOptions, livePalette, loadCytoscape, makeStyle, ownerRing, type ColorBy, type Insets, type LegendItem, type Scope } from '../network/graph';
+import {
+  autoMinAmount, buildElements, fitInView, graphSignature, layoutOptions, livePalette, loadCytoscape, makeStyle, ownerRing, updateElementsInPlace,
+  type ColorBy, type Insets, type LegendItem, type Scope,
+} from '../network/graph';
 import { Empty, Field, Modal, Seg, saveBlob } from '../common';
 import { Icon } from '../icons';
+import { PersonModal } from '../PersonEditor';
 import { newId } from '../../store/model';
 import type { ManualNode } from '../../core/types';
+
+interface NodeMenu { id: string; x: number; y: number }
 
 const MIN_OPTIONS = [0, 1_000, 10_000, 50_000, 100_000, 500_000, 1_000_000];
 
@@ -31,6 +37,9 @@ export function NetworkPage() {
   const [showManual, setShowManual] = useState(true);
   const [panelOpen, setPanelOpen] = useState(typeof window !== 'undefined' ? window.innerWidth > 720 : true);
   const [modal, setModal] = useState<'node' | 'link' | null>(null);
+  const [menu, setMenu] = useState<NodeMenu | null>(null);
+  const [personId, setPersonId] = useState<string | null>(null);
+  const sigRef = useRef('');
   const focus = params.get('focus');
 
   const built = useMemo(() => {
@@ -42,7 +51,7 @@ export function NetworkPage() {
       to: to ? Date.parse(to + 'T23:59:59Z') : undefined,
     }, livePalette());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [res, d, st.manualNodes, st.manualLinks, scope, topPerOwner, minAmount, allMin, colorBy, showCash, showManual, from, to, focus, theme.value]);
+  }, [res, d, st.manualNodes, st.manualLinks, st.accountNotes, scope, topPerOwner, minAmount, allMin, colorBy, showCash, showManual, from, to, focus, theme.value]);
 
   /** พื้นที่ที่แผงเครื่องมือ/คำอธิบายสีลอยทับ — ใช้เว้นขอบตอนจัดผังให้พอดี (จอแคบ: แผงเต็มความกว้าง จึงเว้นด้านบนแทน) */
   const viewInsets = (): Insets => {
@@ -63,7 +72,22 @@ export function NetworkPage() {
       if (disposed || !host.current) return;
       cy = cytoscape({ container: host.current, elements: [], style: makeStyle(livePalette()), wheelSensitivity: 0.25, minZoom: 0.05, maxZoom: 4 });
       cyRef.current = cy;
+      (host.current as HTMLDivElement & { __cy?: Core }).__cy = cy; // ให้ e2e หาตำแหน่งจุดบนผังได้
+      // คลิกขวา (เมาส์) หรือกดค้าง (จอสัมผัส) ที่จุดบัญชี → เมนูตั้งชื่อ/ใส่รูป
+      let heldAt = 0;
+      const openMenu = (ev: EventObject) => {
+        const id = ev.target.id() as string;
+        if (accounts.value[id]?.kind !== 'account') return;
+        if (ev.type === 'taphold') heldAt = Date.now();
+        const p = ev.renderedPosition ?? ev.target.renderedPosition();
+        setMenu({ id, x: p.x, y: p.y });
+      };
+      cy.on('cxttap', 'node', openMenu);
+      cy.on('taphold', 'node', openMenu);
+      cy.on('tap', () => setMenu(null));
+      cy.on('viewport', () => setMenu(null));
       cy.on('tap', 'node', (ev) => {
+        if (Date.now() - heldAt < 800) return; // นิ้วที่ยกหลังกดค้างไม่นับเป็นแตะ
         const n = ev.target;
         cy!.elements().removeClass('hl faded');
         const nb = n.closedNeighborhood();
@@ -88,13 +112,20 @@ export function NetworkPage() {
       cy.on('mouseout', 'edge', (ev) => { ev.target.removeClass('hl'); });
       setReady(true);
     });
-    return () => { disposed = true; cyRef.current = null; setReady(false); cy?.destroy(); };
+    return () => { disposed = true; cyRef.current = null; sigRef.current = ''; setReady(false); cy?.destroy(); };
   }, [hasData]);
 
-  // ใส่ข้อมูลและจัดวาง
+  // ใส่ข้อมูลและจัดวาง — ถ้าโครงสร้างผังเท่าเดิม (เช่น แค่ตั้งชื่อ/ใส่รูป/เปลี่ยนสี) แก้ข้อมูลของจุดเดิม ไม่จัดวางใหม่
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy || !ready || !built) return;
+    const sig = (focus ?? '') + '#' + graphSignature(built.elements);
+    if (sig === sigRef.current && cy.elements().nonempty()) {
+      updateElementsInPlace(cy, built.elements);
+      return;
+    }
+    sigRef.current = sig;
+    setMenu(null);
     cy.batch(() => {
       cy.elements().remove();
       cy.add(built.elements);
@@ -151,7 +182,8 @@ export function NetworkPage() {
   return (
     <div class="net-wrap">
       <div class="net-canvas">
-        <div ref={host} style="position:absolute;inset:0" role="img" aria-label="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี" />
+        <div ref={host} style="position:absolute;inset:0" role="img" aria-label="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี" onContextMenu={(e) => e.preventDefault()} />
+        {menu && <NodeMenuPopup menu={menu} onClose={() => setMenu(null)} onEdit={(id) => { setMenu(null); setPersonId(id); }} />}
         <div class="net-tools" ref={toolsRef}>
           <button class="btn sm" onClick={() => setPanelOpen(!panelOpen)}><Icon name="filter" size={15} />{panelOpen ? 'ซ่อนตัวกรอง' : 'ตัวกรอง / เครื่องมือ'}</button>
           {panelOpen && (
@@ -205,6 +237,48 @@ export function NetworkPage() {
       </div>
       {modal === 'node' && <NodeModal onClose={() => setModal(null)} />}
       {modal === 'link' && <LinkModal onClose={() => setModal(null)} />}
+      {personId && <PersonModal id={personId} onClose={() => setPersonId(null)} />}
+    </div>
+  );
+}
+
+/** เมนูลอยของจุดบัญชี (คลิกขวา/กดค้าง) — วางที่ตำแหน่งจุด แต่ไม่ให้ล้นขอบผัง */
+function NodeMenuPopup({ menu, onClose, onEdit }: { menu: NodeMenu; onClose: () => void; onEdit: (id: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: menu.x, top: menu.y });
+  const photo = cs.value?.accountNotes[menu.id]?.photo;
+  const a = accounts.value[menu.id];
+
+  useEffect(() => {
+    const el = ref.current;
+    const box = el?.parentElement;
+    if (el && box) {
+      setPos({
+        left: Math.max(8, Math.min(menu.x + 6, box.clientWidth - el.offsetWidth - 8)),
+        top: Math.max(8, Math.min(menu.y + 6, box.clientHeight - el.offsetHeight - 8)),
+      });
+      el.querySelector<HTMLButtonElement>('button')?.focus();
+    }
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onDown = (e: PointerEvent) => { if (el && !el.contains(e.target as Node)) onClose(); };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', onDown, true);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('pointerdown', onDown, true); };
+  }, [menu.id, menu.x, menu.y]);
+
+  if (!a) return null;
+  const act = (fn: () => void) => () => { onClose(); fn(); };
+  return (
+    <div class="ctx-menu" ref={ref} role="menu" aria-label={'เมนูของ ' + labelOf(menu.id)} style={{ left: pos.left + 'px', top: pos.top + 'px' }}>
+      <div class="ctx-head ellipsis" title={labelOf(menu.id)}>{labelOf(menu.id)}</div>
+      <button role="menuitem" onClick={() => onEdit(menu.id)}><Icon name="user" size={16} />{a.label || photo ? 'แก้ชื่อ-นามสกุล / รูปบุคคล…' : 'ตั้งชื่อ-นามสกุล / ใส่รูปบุคคล…'}</button>
+      <button role="menuitem" onClick={act(() => openInspector({ kind: 'account', id: menu.id }))}><Icon name="info" size={16} />รายละเอียดบัญชี</button>
+      <button role="menuitem" onClick={act(() => go('/transactions', { acc: menu.id }))}><Icon name="list" size={16} />ธุรกรรมของบัญชีนี้</button>
+      {photo && (
+        <button role="menuitem" class="danger" onClick={act(() => { void setAccountNote(menu.id, { photo: '' }).then(() => notify('ลบรูปแล้ว')); })}>
+          <Icon name="trash" size={16} />ลบรูปบุคคล
+        </button>
+      )}
     </div>
   );
 }

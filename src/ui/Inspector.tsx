@@ -1,4 +1,5 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
+import { draftOf, noteOf, PersonFields, PersonPhoto, type PersonDraft } from './PersonEditor';
 import { accounts, analysis, cs, derived, go, inspector, labelOf, mergeAccounts, notify, openInspector, patchCase, setAccountNote, txnById } from '../state';
 import { Icon } from './icons';
 import { ComponentBars, COMP_LABELS } from './charts';
@@ -21,7 +22,7 @@ export function Inspector() {
         <button class="btn ghost icon sm" onClick={() => openInspector(null)} aria-label="ปิดแผงรายละเอียด"><Icon name="close" /></button>
       </div>
       <div class="inspector-body">
-        {t.kind === 'account' && <AccountPanel id={t.id} />}
+        {t.kind === 'account' && <AccountPanel key={t.id} id={t.id} />}
         {t.kind === 'signal' && <SignalPanel id={t.id} />}
         {t.kind === 'txn' && <TxnPanel id={t.id} />}
       </div>
@@ -42,8 +43,10 @@ function AccountPanel({ id }: { id: string }) {
   const a = accounts.value[id];
   const res = analysis.value;
   const st = cs.value!;
-  const [label, setLabel] = useState(st.accountNotes[id]?.label ?? '');
-  const [note, setNote] = useState(st.accountNotes[id]?.note ?? '');
+  const saved = st.accountNotes[id];
+  const [draft, setDraft] = useState<PersonDraft>(() => draftOf(saved));
+  // แก้จากที่อื่น (เมนูคลิกขวาบนผัง) → แสดงค่าล่าสุด
+  useEffect(() => setDraft(draftOf(saved)), [saved]);
   if (!a) return <div class="muted">ไม่พบบัญชี</div>;
   const p = res?.profiles[id];
   const m = res?.metrics[id];
@@ -58,13 +61,19 @@ function AccountPanel({ id }: { id: string }) {
 
   return (
     <>
-      <div>
+      <div class="row" style="align-items:flex-start">
+        {saved?.photo && <PersonPhoto src={saved.photo} size={56} alt={`รูปของ ${a.label || a.name || 'บุคคล'}`} />}
+        <div class="grow" style="min-width:0">
         <div style="font-size:16px;font-weight:600">{a.label || a.name || (a.number ? formatAccountNumber(a.number) : a.id)}</div>
         {a.kind === 'account' && (
           <div class="secondary small">
             {a.number ? formatAccountNumber(a.number) : 'ไม่ทราบเลขบัญชี'} {a.bank ? '· ' + bankDisplay(a.bank) : ''}
           </div>
         )}
+        {a.label && a.name && a.label !== a.name && <div class="tiny muted">ชื่อบัญชีตามข้อมูลธนาคาร: {a.name}</div>}
+        </div>
+      </div>
+      <div>
         <div class="row wrap" style="margin-top:6px">
           {a.kind === 'account' && (a.hasStatement ? <span class="chip accent">มี Statement</span> : <span class="chip">ไม่มี Statement (เห็นเฉพาะรายการในบัญชีอื่น)</span>)}
           {a.masked && <span class="chip warn">เลขบัญชีถูกปิดบางส่วน</span>}
@@ -184,13 +193,8 @@ function AccountPanel({ id }: { id: string }) {
 
       {a.kind === 'account' && (
         <section class="stack tight">
-          <h3>บันทึกของผู้สืบสวน</h3>
-          <label class="field">ชื่อ/ผู้เกี่ยวข้อง (ใช้แสดงแทนในทุกหน้า)
-            <input class="input" value={label} onInput={(e) => setLabel((e.target as HTMLInputElement).value)} onBlur={() => setAccountNote(id, { label })} placeholder="เช่น นาย ก. (เจ้าของบัญชีตาม KYC)" />
-          </label>
-          <label class="field">หมายเหตุ
-            <textarea class="textarea" rows={3} value={note} onInput={(e) => setNote((e.target as HTMLTextAreaElement).value)} onBlur={() => setAccountNote(id, { note })} placeholder="ที่มาของข้อมูล เลขที่เอกสาร ฯลฯ" />
-          </label>
+          <h3>บันทึกของผู้สืบสวน: ชื่อ-นามสกุล และรูปบุคคล</h3>
+          <PersonFields draft={draft} onChange={setDraft} onCommit={(d) => void setAccountNote(id, noteOf(d))} />
         </section>
       )}
     </>

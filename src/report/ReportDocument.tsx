@@ -21,6 +21,8 @@ export interface ReportOptions {
   counterparties: boolean;
   trails: boolean;
   network: boolean;
+  /** รูปบุคคลที่ผู้สืบสวนใส่ไว้ในจุดบัญชี — ค่าเริ่มต้นไม่แสดง เพื่อไม่ให้รูปติดไปในเอกสารโดยไม่ตั้งใจ */
+  networkPhotos: boolean;
   timeline: boolean;
   findings: boolean;
   appendixParams: boolean;
@@ -28,7 +30,7 @@ export interface ReportOptions {
 }
 
 export const DEFAULT_REPORT_OPTIONS: ReportOptions = {
-  summary: true, quality: true, profile: true, counterparties: true, trails: true, network: true,
+  summary: true, quality: true, profile: true, counterparties: true, trails: true, network: true, networkPhotos: false,
   timeline: true, findings: true, appendixParams: true, appendixTxns: true,
 };
 

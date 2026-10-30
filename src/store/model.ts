@@ -37,8 +37,15 @@ export interface CaseState {
   manualLinks: ManualLink[];
   aliases: AliasGroup[];
   pinnedTraces: PinnedTrace[];
-  /** ชื่อ/หมายเหตุที่ผู้สืบสวนกำหนดต่อบัญชี */
-  accountNotes: Record<string, { label?: string; note?: string }>;
+  /** ชื่อ/หมายเหตุ/รูปบุคคลที่ผู้สืบสวนกำหนดต่อบัญชี */
+  accountNotes: Record<string, AccountNote>;
+}
+
+export interface AccountNote {
+  label?: string;
+  note?: string;
+  /** รูปบุคคล: data URL JPEG สี่เหลี่ยมจัตุรัสขนาดเล็ก — ไม่คัดลอกเข้า Account เพื่อไม่ให้ถูกส่งไป worker ทุกครั้งที่วิเคราะห์ */
+  photo?: string;
 }
 
 export function newId(prefix = ''): string {

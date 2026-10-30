@@ -8,7 +8,7 @@ import { Icon } from '../icons';
 
 const OPT_LABELS: { key: keyof ReportOptions; label: string }[] = [
   { key: 'summary', label: 'บทสรุปผู้บริหาร' }, { key: 'quality', label: 'คุณภาพและขอบเขตข้อมูล' }, { key: 'profile', label: 'โปรไฟล์ทางการเงิน + กราฟ' },
-  { key: 'counterparties', label: 'คู่บัญชีสำคัญ' }, { key: 'trails', label: 'เส้นทางเงิน (Money Trail)' }, { key: 'network', label: 'ผังความเชื่อมโยง' },
+  { key: 'counterparties', label: 'คู่บัญชีสำคัญ' }, { key: 'trails', label: 'เส้นทางเงิน (Money Trail)' }, { key: 'network', label: 'ผังความเชื่อมโยง' }, { key: 'networkPhotos', label: 'รูปบุคคลในผังความเชื่อมโยง' },
   { key: 'timeline', label: 'ไทม์ไลน์' }, { key: 'findings', label: 'ผลวิเคราะห์ 4 ระดับ' }, { key: 'appendixParams', label: 'ภาคผนวก ก: พารามิเตอร์/ไฟล์/SHA-256' }, { key: 'appendixTxns', label: 'ภาคผนวก ข: ธุรกรรมหลักฐาน' },
 ];
 
@@ -50,12 +50,12 @@ export function ReportPage() {
     if (!res || !d || !opts.network) { setNet(null); return; }
     let cancelled = false;
     setNetBusy(true);
-    renderNetworkImage(d, res, st, { scope: 'core', topPerOwner: 12, colorBy: 'role', showCash: true, showManual: true })
+    renderNetworkImage(d, res, st, { scope: 'core', topPerOwner: 12, colorBy: 'role', showCash: true, showManual: true, showPhotos: opts.networkPhotos })
       .then((r) => { if (!cancelled) setNet(r); })
       .catch((e) => { console.error(e); if (!cancelled) setNet(null); })
       .finally(() => !cancelled && setNetBusy(false));
     return () => { cancelled = true; };
-  }, [res, d, st.manualNodes, st.manualLinks, opts.network]);
+  }, [res, d, st.manualNodes, st.manualLinks, st.accountNotes, opts.network, opts.networkPhotos]);
 
   // เส้นทางที่ปักหมุด
   useEffect(() => {

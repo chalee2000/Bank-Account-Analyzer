@@ -29,6 +29,8 @@ export interface NetOptions {
   showManual: boolean;
   /** แสดงเพื่อนบ้านทั้งหมดของบัญชีเหล่านี้ด้วย (มาจาก "ดูในเครือข่าย") */
   focus?: string[];
+  /** แสดงรูปบุคคลที่ผู้สืบสวนใส่ไว้ในจุดบัญชี (ค่าเริ่มต้น: แสดง) */
+  showPhotos?: boolean;
 }
 
 export interface Palette {
@@ -135,7 +137,15 @@ function nodeLabel(a: Account, role: Role): { label: string; full: string } {
   const full = [name, [a.bank ? bankDisplay(a.bank) : '', a.number ? formatAccountNumber(a.number) : ''].filter(Boolean).join(' ')].filter(Boolean).join('\n');
   if (role === 'owner') return { label: [clip(name || head, 24), name ? head : ''].filter(Boolean).join('\n'), full };
   if (role === 'shared') return { label: [clip(name, 16), head].filter(Boolean).join('\n') || head, full };
+  // คู่บัญชีทั่วไปแสดงแค่รหัสธนาคาร+เลขท้ายเพื่อไม่ให้ผังรก — เว้นแต่ผู้สืบสวนตั้งชื่อไว้เอง
+  const own = (a.label ?? '').trim();
+  if (own) return { label: [clip(own, 18), head].filter(Boolean).join('\n'), full };
   return { label: head || clip(name, 14), full };
+}
+
+/** โครงสร้างของผัง (จุด + ต้นทาง/ปลายทางของเส้น) — เท่ากันแปลว่าเปลี่ยนแค่ป้ายชื่อ/รูป/สี ไม่ต้องจัดวางใหม่ */
+export function graphSignature(elements: ElementDefinition[]): string {
+  return elements.map((e) => ('source' in e.data ? `${e.data.id}:${e.data.source}>${e.data.target}` : String(e.data.id))).join('|');
 }
 
 export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, opts: NetOptions, pal: Palette): BuiltGraph {
@@ -318,13 +328,16 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
     const w = m ? m.weightedIn + m.weightedOut : 0;
     const role = roleOf(id);
     const lg = Math.log10(1 + w);
-    const size = role === 'owner' ? 46 + Math.min(30, lg * 4.2) : role === 'cash' ? 24 : role === 'shared' ? 24 + Math.min(18, lg * 2.4) : 14 + Math.min(18, lg * 2.6);
+    const photo = opts.showPhotos !== false && a.kind === 'account' ? st.accountNotes?.[id]?.photo : undefined;
+    const base = role === 'owner' ? 46 + Math.min(30, lg * 4.2) : role === 'cash' ? 24 : role === 'shared' ? 24 + Math.min(18, lg * 2.4) : 14 + Math.min(18, lg * 2.6);
+    const size = photo ? Math.max(base, 44) : base; // จุดที่มีรูปต้องใหญ่พอให้เห็นหน้า
     const { label, full } = nodeLabel(a, role);
     elements.push({
       data: {
         id, label, full, role, kind: a.kind, size, color: colorOf(id), fs: role === 'owner' ? OWNER_LABEL_FONT : role === 'shared' ? 11 : 9.5,
         hasStatement: a.hasStatement ? 1 : 0, bridge: m?.isBridge ? 1 : 0, bank: a.bank ?? '',
         ...(role === 'owner' ? { ring: ringOrder.indexOf(id), ringN: ringOrder.length, tw: OWNER_LABEL_WIDTH } : {}),
+        ...(photo ? { photo } : {}),
       },
       classes: role,
     });
@@ -407,6 +420,15 @@ export function makeStyle(pal: Palette): StylesheetJson {
     { selector: 'node.manual', style: { shape: 'diamond', 'border-style': 'dotted', 'border-color': pal.textMuted, 'border-width': 2 } },
     { selector: 'node[bridge = 1]', style: { 'border-color': pal.accent, 'border-width': 4 } },
     { selector: 'node.owner[bridge = 1]', style: { 'border-color': pal.surface, 'border-width': 5 } },
+    // รูปบุคคลเต็มวง — สีบทบาท/ธนาคารย้ายไปอยู่ที่ขอบ
+    {
+      selector: 'node[photo]',
+      style: {
+        'background-image': 'data(photo)', 'background-fit': 'cover', 'background-clip': 'node', 'background-color': pal.surface,
+        'border-color': 'data(color)', 'border-width': 4, 'border-style': 'solid',
+      },
+    },
+    { selector: 'node.owner[photo]', style: { 'border-width': 6 } },
     {
       selector: 'edge',
       style: {
@@ -496,6 +518,29 @@ export function scaleOwnerLabels(cy: cytoscapeNS.Core): void {
   });
 }
 
+const RUNTIME_CLASSES = ['hl', 'faded', 'hov'];
+const FIXED_KEYS = new Set(['id', 'source', 'target']);
+
+/**
+ * แก้ข้อมูล (ป้ายชื่อ รูป สี ขนาด) ของ element ที่อยู่บนผังแล้ว โดยไม่ลบและไม่จัดวางใหม่ — ตำแหน่งจุดคงเดิม
+ * ใช้เมื่อ graphSignature ไม่เปลี่ยน; คงคลาสสถานะ (ไฮไลต์/จาง/ชี้) ที่ผู้ใช้กำลังดูอยู่
+ */
+export function updateElementsInPlace(cy: cytoscapeNS.Core, elements: ElementDefinition[]): void {
+  cy.batch(() => {
+    for (const def of elements) {
+      const ele = cy.getElementById(def.data.id as string);
+      if (ele.empty()) continue;
+      for (const k of Object.keys(ele.data())) if (!FIXED_KEYS.has(k) && !(k in def.data)) ele.removeData(k);
+      const next: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(def.data)) if (!FIXED_KEYS.has(k)) next[k] = v;
+      ele.data(next);
+      const keep = RUNTIME_CLASSES.filter((c) => ele.hasClass(c));
+      ele.classes([...String(def.classes ?? '').split(/\s+/).filter(Boolean), ...keep].join(' '));
+    }
+  });
+  scaleOwnerLabels(cy);
+}
+
 /** จัดผังให้พอดีในพื้นที่ที่ไม่ถูกบัง (ไม่ขยายเกิน 1.6 เท่าเมื่อมีจุดน้อย) */
 export function fitInView(cy: cytoscapeNS.Core, insets: Insets, eles?: cytoscapeNS.Collection): void {
   const col = eles ?? cy.elements();
@@ -533,6 +578,14 @@ export async function renderNetworkImage(
     const layout = cy.layout(layoutOptions(built.nodeCount, false, ownerRing(built.elements)) as never);
     await new Promise<void>((resolve) => { layout.one('layoutstop', () => resolve()); layout.run(); });
     fitInView(cy, { top: 30, right: 30, bottom: 30, left: 30 });
+    // รูปบุคคลโหลดแบบ async ใน Cytoscape — รอให้โหลดเสร็จก่อนถ่ายภาพ ไม่เช่นนั้นภาพในรายงานจะไม่มีรูป
+    const photos = built.elements.map((e) => e.data.photo as string | undefined).filter((p): p is string => !!p);
+    if (photos.length) {
+      await Promise.all(photos.map((src) => { const im = new Image(); im.src = src; return im.decode().catch(() => undefined); }));
+      await new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 120)));
+      cy.forceRender();
+      await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    }
     const dataUrl = cy.png({ output: 'base64uri', scale: 1.5, bg: '#ffffff', full: false }) as string;
     cy.destroy();
     return { dataUrl, nodeCount: built.nodeCount, edgeCount: built.edgeCount, legend: built.legend, summary: built.summary };

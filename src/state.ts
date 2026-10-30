@@ -6,7 +6,7 @@ import { accountLabel } from './analysis/ctx';
 import {
   deleteCase, deleteFile, listCases, loadCase, saveCaseBase, saveFile, wipeAll, getKv, setKv,
 } from './store/db';
-import { createCaseState, deriveCase, newId, type CaseState, type Derived, type StoredFile } from './store/model';
+import { createCaseState, deriveCase, newId, type AccountNote, type CaseState, type Derived, type StoredFile } from './store/model';
 
 // ---------- Router ----------
 export interface Route {
@@ -243,12 +243,21 @@ export async function regenerateFindings() {
   await patchCase({ findings: next, findingsGenerated: true, findingsSig: dataSignature(cur) });
 }
 
-export async function setAccountNote(id: string, note: { label?: string; note?: string }) {
+export async function setAccountNote(id: string, note: AccountNote) {
   const cur = cs.peek();
   if (!cur) return;
-  const prev = cur.accountNotes[id] ?? {};
-  await patchCase({ accountNotes: { ...cur.accountNotes, [id]: { ...prev, ...note } } });
-  derived.value = deriveCase(cs.peek()!);
+  const next = { ...(cur.accountNotes[id] ?? {}), ...note };
+  for (const k of Object.keys(next) as (keyof AccountNote)[]) if (!next[k]) delete next[k];
+  const accountNotes = { ...cur.accountNotes };
+  if (Object.keys(next).length) accountNotes[id] = next;
+  else delete accountNotes[id];
+  await patchCase({ accountNotes });
+  // ชื่อ/หมายเหตุแสดงผ่าน Account — แก้เฉพาะบัญชีนี้ ไม่ต้องรวมไฟล์ทั้งคดีใหม่ (รูปอ่านจาก accountNotes โดยตรง)
+  const d = derived.peek();
+  const acc = d?.accounts[id];
+  if (d && acc && (acc.label !== next.label || acc.note !== next.note)) {
+    derived.value = { ...d, accounts: { ...d.accounts, [id]: { ...acc, label: next.label, note: next.note } } };
+  }
 }
 
 /** รวมสองบัญชีเป็นหน่วยเดียว (ผู้ใช้ยืนยัน) — บัญชีที่มี statement/เลขเต็มเป็นตัวหลัก */

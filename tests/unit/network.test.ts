@@ -4,7 +4,9 @@ import { describe, it, expect } from 'vitest';
 import { buildDemoCase } from '../../src/demo';
 import { deriveCase } from '../../src/store/model';
 import { analyze } from '../../src/analysis';
-import { buildElements, computeFit, fitInView, ownerLabelScale, ownerRing, ownerRingRadius, PRINT_PALETTE, type NetOptions } from '../../src/ui/network/graph';
+import {
+  buildElements, computeFit, fitInView, graphSignature, ownerLabelScale, ownerRing, ownerRingRadius, PRINT_PALETTE, updateElementsInPlace, type NetOptions,
+} from '../../src/ui/network/graph';
 
 const state = buildDemoCase();
 const derived = deriveCase(state);
@@ -174,6 +176,72 @@ describe('ผังเครือข่าย: ป้ายชื่อเจ�
     const cyy = ((c.y1 + c.y2) / 2) * cy.zoom() + cy.pan().y;
     expect(cx).toBeGreaterThan(310);
     expect(cyy).toBeLessThan(700 - 90);
+    cy.destroy();
+  });
+});
+
+describe('ผังเครือข่าย: ชื่อและรูปบุคคลที่ผู้สืบสวนกำหนด', () => {
+  const PHOTO = 'data:image/jpeg;base64,/9j/AAAA';
+  const NAME = 'นายสมมติ ทดสอบระบบ';
+  const plain = nodes(build()).find((n) => n.data.role === 'plain')!;
+  const id = plain.data.id as string;
+  /** สถานะคดีหลังตั้งชื่อ/ใส่รูป — derived สร้างจาก deriveCase เหมือนตอนเปิดคดี */
+  const withNote = (note: { label?: string; photo?: string }) => {
+    const st = { ...state, accountNotes: { [id]: note } };
+    return { st, d: deriveCase(st) };
+  };
+  const nodeOf = (g: ReturnType<typeof build>, nid = id) => nodes(g).find((n) => n.data.id === nid)!;
+
+  it('คู่บัญชีทั่วไปแสดงแค่รหัสธนาคาร+เลขท้าย; เมื่อตั้งชื่อแล้วแสดงชื่อเหนือรหัส', () => {
+    const before = plain.data.label as string;
+    expect(before).toMatch(/^\S+ ••\d{4}$/);
+    const { st, d } = withNote({ label: NAME });
+    const g = buildElements(d, result, st, base, PRINT_PALETTE);
+    expect((nodeOf(g).data.label as string).split('\n')).toEqual([NAME, before]);
+    expect(nodeOf(g).data.full).toContain(NAME);
+  });
+
+  it('รูปบุคคลอยู่ใน data(photo) และจุดใหญ่พอเห็นหน้า; ปิด showPhotos (เช่นในรายงาน) แล้วไม่มีรูป', () => {
+    const { st, d } = withNote({ photo: PHOTO });
+    const on = nodeOf(buildElements(d, result, st, base, PRINT_PALETTE));
+    expect(on.data.photo).toBe(PHOTO);
+    expect(on.data.size).toBeGreaterThanOrEqual(44);
+    const off = nodeOf(buildElements(d, result, st, { ...base, showPhotos: false }, PRINT_PALETTE));
+    expect(off.data.photo).toBeUndefined();
+    expect(off.data.size).toBe(plain.data.size);
+    // จุดอื่นไม่ได้รับรูปไปด้วย
+    expect(nodes(buildElements(d, result, st, base, PRINT_PALETTE)).filter((n) => n.data.photo)).toHaveLength(1);
+  });
+
+  it('graphSignature เท่าเดิมเมื่อเปลี่ยนแค่ชื่อ/รูป/สี (ไม่ต้องจัดวางใหม่) แต่ต่างเมื่อจุดหรือเส้นเปลี่ยน', () => {
+    const sig = graphSignature(build().elements);
+    const { st, d } = withNote({ label: NAME, photo: PHOTO });
+    expect(graphSignature(buildElements(d, result, st, base, PRINT_PALETTE).elements)).toBe(sig);
+    expect(graphSignature(build({ colorBy: 'bank' }).elements)).toBe(sig);
+    expect(graphSignature(build({ scope: 'all' }).elements)).not.toBe(sig);
+    expect(graphSignature(build({ showCash: true }).elements)).not.toBe(sig);
+  });
+
+  it('updateElementsInPlace แก้ป้ายและรูปโดยตำแหน่งจุดและไฮไลต์ที่กำลังดูคงเดิม และลบรูปออกได้', () => {
+    const g = build();
+    // Cytoscape ใช้อ็อบเจ็กต์ data ของ element ที่ส่งเข้าไปตรง ๆ — คัดลอกก่อน ไม่ให้การแก้ข้อมูลย้อนไปเปลี่ยน g
+    const cy = cytoscape({ headless: true, styleEnabled: false, elements: structuredClone(g.elements) });
+    cy.nodes().forEach((n, i) => { n.position({ x: i * 37, y: (i % 5) * 29 }); });
+    const n = cy.getElementById(id);
+    const pos = { ...n.position() };
+    n.addClass('hl');
+    const { st, d } = withNote({ label: NAME, photo: PHOTO });
+    updateElementsInPlace(cy, buildElements(d, result, st, base, PRINT_PALETTE).elements);
+    expect(n.data('photo')).toBe(PHOTO);
+    expect(String(n.data('label'))).toContain(NAME);
+    expect(n.position()).toEqual(pos);
+    expect(n.hasClass('hl')).toBe(true);
+    expect(n.hasClass('plain')).toBe(true);
+    // กลับเป็นไม่มีรูป/ชื่อ → ข้อมูลรูปต้องหายไปจริง (selector node[photo] จะไม่จับ)
+    updateElementsInPlace(cy, g.elements);
+    expect(n.data('photo')).toBeUndefined();
+    expect(n.data('label')).toBe(plain.data.label);
+    expect(cy.nodes('[photo]').length).toBe(0);
     cy.destroy();
   });
 });
