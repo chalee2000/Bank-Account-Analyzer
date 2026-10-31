@@ -248,6 +248,12 @@ export function ReportDocument({ data }: { data: ReportData }) {
                 {data.net.legend.length > 0 && <> · สี: {data.net.legend.map((l) => <span key={l.label} class="rpt-sw"><i style={{ background: l.color }} />{l.label}</span>)}</>}</figcaption>
             </figure>
           ) : <p class="rpt-note">ไม่มีข้อมูลเครือข่ายสำหรับแสดง</p>}
+          {data.net && !!st.networkView?.notes?.length && (
+            <div class="rpt-notes">
+              <strong>ข้อความประกอบผัง (บันทึกของผู้สืบสวน)</strong>
+              <ol>{st.networkView.notes.map((nt) => <li key={nt.id}>{nt.text}</li>)}</ol>
+            </div>
+          )}
           <table class="rpt-table small">
             <thead><tr><th>บัญชี</th><th class="n">โอนเข้า/ออก (บัญชี)</th><th class="n">Betweenness</th><th>จุดตัด</th><th>บทบาทเบื้องต้นที่ “อาจมี”</th></tr></thead>
             <tbody>

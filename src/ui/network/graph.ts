@@ -9,7 +9,7 @@
 import type cytoscapeNS from 'cytoscape';
 import type { ElementDefinition, StylesheetJson } from 'cytoscape';
 import type { Account, AnalysisResult } from '../../core/types';
-import type { CaseState, Derived, LayoutMode, NetworkViewOptions, SavedPositions } from '../../store/model';
+import type { CaseState, Derived, LayoutMode, NetNote, NetworkViewOptions, SavedPositions } from '../../store/model';
 import { bankDisplay, formatAccountNumber } from '../../core/normalize';
 import { fmtBaht, formatThaiDate } from '../../core/thai';
 
@@ -31,6 +31,12 @@ export interface NetOptions {
   focus?: string[];
   /** แสดงรูปบุคคลที่ผู้สืบสวนใส่ไว้ในจุดบัญชี (ค่าเริ่มต้น: แสดง) */
   showPhotos?: boolean;
+  /** ป้ายยอดเงินบนทุกเส้น: ไม่แสดง (ดูตอนชี้) / ปกติ / แบบการ์ด */
+  edgeLabels?: 'off' | 'plain' | 'card';
+  /** ตัวย่อธนาคารในวงกลมของจุดบัญชี */
+  bankBadges?: boolean;
+  /** เส้นที่ปักให้แสดงรายละเอียดตลอด (คีย์ "ต้นทาง>ปลายทาง") */
+  pinnedEdges?: string[];
 }
 
 export interface Palette {
@@ -50,6 +56,8 @@ export interface Palette {
   surface: string;
   accent: string;
   warn: string;
+  noteBg: string;
+  noteText: string;
 }
 
 export function livePalette(): Palette {
@@ -71,6 +79,8 @@ export function livePalette(): Palette {
     surface: v('--surface-1', '#fff'),
     accent: v('--accent', '#5b4ee8'),
     warn: v('--s4', '#eda100'),
+    noteBg: v('--note-bg', '#fff4c2'),
+    noteText: v('--note-text', '#3d3000'),
   };
 }
 
@@ -79,6 +89,7 @@ export const PRINT_PALETTE: Palette = {
   inflow: '#1baf7a', outflow: '#eb6834', between: '#5b4ee8',
   slots: ['#6250d6', '#008300', '#e87ba4', '#eda100'], neutral: '#8795bd',
   text: '#161614', textMuted: '#52514e', surface: '#ffffff', accent: '#5b4ee8', warn: '#eda100',
+  noteBg: '#fff4c2', noteText: '#3d3000',
 };
 
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
@@ -98,6 +109,7 @@ export function netOptionsFromView(v: NetworkViewOptions, res: AnalysisResult): 
     minAmount: v.scope === 'all' ? (v.allMin ?? autoMinAmount(res)) : 0,
     from: v.from ? Date.parse(v.from + 'T00:00:00Z') : undefined,
     to: v.to ? Date.parse(v.to + 'T23:59:59Z') : undefined,
+    edgeLabels: v.edgeLabels ?? 'off', bankBadges: !!v.bankBadges, pinnedEdges: v.pinnedEdges ?? [],
   };
 }
 
@@ -120,7 +132,7 @@ const OWNER_LABEL_FONT = 13;
 const OWNER_LABEL_WIDTH = 140;
 
 type Role = 'owner' | 'shared' | 'plain' | 'cash' | 'agg' | 'manual';
-type Pair = { from: string; to: string; total: number; count: number };
+type Pair = { from: string; to: string; total: number; count: number; firstTs?: number; lastTs?: number };
 
 /** ธนาคารที่มียอดรวมสูงสุดของ "ทั้งคดี" (ไม่ใช่เฉพาะส่วนที่แสดง) — สีจึงไม่เปลี่ยนเมื่อกรองข้อมูล */
 function rankBanks(d: Derived): string[] {
@@ -132,6 +144,26 @@ function rankBanks(d: Derived): string[] {
     }
   }
   return [...sum.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
+}
+
+/** สีตัวอักษรบนพื้นสี (ไอคอนธนาคาร) — เลือกขาว/ดำตามความสว่างของพื้น */
+export function badgeTextColor(fill: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(fill.trim());
+  if (!m) return '#ffffff';
+  const n = parseInt(m[1]!, 16);
+  const lin = (c: number) => { const x = c / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+  const L = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  // ความต่างกับขาว vs ดำ — เลือกค่าที่มากกว่า
+  return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#ffffff' : '#141414';
+}
+
+/** ไอคอนธนาคาร: วงกลมสีของจุด + ตัวย่อธนาคาร (ตัวอักษร ไม่ใช่โลโก้จริง) เป็น SVG data URL */
+export function bankBadge(tag: string, fill: string): string {
+  const esc = tag.replace(/[<>&'"]/g, '');
+  const fs = esc.length <= 3 ? 36 : esc.length === 4 ? 29 : esc.length === 5 ? 24 : 19;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='${fill}'/>`
+    + `<text x='50' y='50' dy='0.35em' text-anchor='middle' font-family='Arial,Helvetica,sans-serif' font-weight='700' font-size='${fs}' fill='${badgeTextColor(fill)}'>${esc}</text></svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
 function bankTag(a: Account): string {
@@ -170,7 +202,8 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
       if (opts.to !== undefined && t.ts > opts.to) continue;
       const k = t.from + '\u0000' + t.to;
       const e = pairs.get(k);
-      if (e) { e.total += t.amount; e.count++; } else pairs.set(k, { from: t.from, to: t.to, total: t.amount, count: 1 });
+      if (e) { e.total += t.amount; e.count++; e.firstTs = Math.min(e.firstTs!, t.ts); e.lastTs = Math.max(e.lastTs!, t.ts); }
+      else pairs.set(k, { from: t.from, to: t.to, total: t.amount, count: 1, firstTs: t.ts, lastTs: t.ts });
     }
   }
 
@@ -189,7 +222,7 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
   // ---- เลือกจุดที่จะแสดง ----
   const nodeIds = new Set<string>();
   const shownEdges: Pair[] = [];
-  const agg: { owner: string; dir: 'in' | 'out'; total: number; count: number; accounts: Set<string> }[] = [];
+  const agg: { owner: string; dir: 'in' | 'out'; total: number; count: number; accounts: Set<string>; firstTs?: number; lastTs?: number }[] = [];
   const sharedIds = new Set<string>();
 
   // เจ้าของแต่ละรายเชื่อมกับใครบ้าง (รวมสองทิศ)
@@ -239,6 +272,10 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
       const a = aggMap.get(k) ?? { owner, dir, total: 0, count: 0, accounts: new Set<string>() };
       a.total += e.total;
       a.count += e.count;
+      const ef = (e as Pair).firstTs;
+      const el = (e as Pair).lastTs;
+      if (ef !== undefined) a.firstTs = a.firstTs === undefined ? ef : Math.min(a.firstTs, ef);
+      if (el !== undefined) a.lastTs = a.lastTs === undefined ? el : Math.max(a.lastTs, el);
       a.accounts.add(other);
       aggMap.set(k, a);
     }
@@ -360,27 +397,47 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
     const lg = Math.log10(1 + w);
     const photo = opts.showPhotos !== false && a.kind === 'account' ? st.accountNotes?.[id]?.photo : undefined;
     const base = role === 'owner' ? 46 + Math.min(30, lg * 4.2) : role === 'cash' ? 24 : role === 'shared' ? 24 + Math.min(18, lg * 2.4) : 14 + Math.min(18, lg * 2.6);
-    const size = photo ? Math.max(base, 44) : base; // จุดที่มีรูปต้องใหญ่พอให้เห็นหน้า
+    const tag = !photo && opts.bankBadges && a.kind === 'account' ? bankTag(a) : '';
+    // จุดที่มีรูปต้องใหญ่พอให้เห็นหน้า; จุดที่มีไอคอนธนาคารต้องใหญ่พอให้อ่านตัวย่อ
+    const size = photo ? Math.max(base, 44) : tag ? Math.max(base, 30) : base;
+    const color = colorOf(id);
     const { label, full } = nodeLabel(a, role);
     elements.push({
       data: {
-        id, label, full, role, kind: a.kind, size, color: colorOf(id), fs: role === 'owner' ? OWNER_LABEL_FONT : role === 'shared' ? 11 : 9.5,
+        id, label, full, role, kind: a.kind, size, color, fs: role === 'owner' ? OWNER_LABEL_FONT : role === 'shared' ? 11 : 9.5,
         hasStatement: a.hasStatement ? 1 : 0, bridge: m?.isBridge ? 1 : 0, bank: a.bank ?? '', anchor: anchorOf(id),
         ...(role === 'owner' ? { ring: ringOrder.indexOf(id), ringN: ringOrder.length, tw: OWNER_LABEL_WIDTH } : {}),
         ...(photo ? { photo } : {}),
+        ...(tag ? { badge: bankBadge(tag, color) } : {}),
       },
       classes: role,
     });
   }
+  // ป้ายบนเส้น: ทุกเส้น (ปกติ/การ์ด) หรือเฉพาะเส้นที่ปักไว้ — ไม่ใช้ก็ดูได้ตอนชี้/แตะ
+  const pinned = new Set(opts.pinnedEdges ?? []);
+  const lblMode = opts.edgeLabels ?? 'off';
+  const span = (a?: number, b?: number) => (a === undefined || b === undefined ? '' : a === b || formatThaiDate(a) === formatThaiDate(b) ? formatThaiDate(a) : `${formatThaiDate(a)} – ${formatThaiDate(b)}`);
+  const edgeLabelData = (src: string, dst: string, total: number, count: number, first?: number, last?: number) => {
+    const card = [`${fmtBaht(total)} ฿`, `${count.toLocaleString('en-US')} รายการ`, span(first, last)].filter(Boolean).join('\n');
+    const pin = pinned.has(`${src}>${dst}`);
+    const cls = [lblMode === 'plain' ? 'lbl-plain' : lblMode === 'card' ? 'lbl-card' : '', pin ? (lblMode === 'card' ? 'lbl-card' : 'lbl-pin') : ''];
+    return { data: { label: `${fmtBaht(total)} ฿ ×${count}`, card, key: `${src}>${dst}` }, cls: [...new Set(cls.filter(Boolean))] };
+  };
   let n = 0;
   for (const e of shownEdges) {
     const c = edgeColor(e.from, e.to);
+    const fl = e as Pair;
+    const L = edgeLabelData(e.from, e.to, e.total, e.count, fl.firstTs, fl.lastTs);
     elements.push({
-      data: { id: 'e' + n++, source: e.from, target: e.to, total: e.total, count: e.count, width: edgeWidth(e.total), color: c, label: `${fmtBaht(e.total)} ฿ ×${e.count}` },
+      data: { id: 'e' + n++, source: e.from, target: e.to, total: e.total, count: e.count, width: edgeWidth(e.total), color: c, ...L.data },
+      ...(L.cls.length ? { classes: L.cls.join(' ') } : {}),
     });
   }
   for (const a of agg) {
     const id = `agg:${a.owner}:${a.dir}`;
+    const src = a.dir === 'in' ? id : a.owner;
+    const dst = a.dir === 'in' ? a.owner : id;
+    const L = edgeLabelData(src, dst, a.total, a.count, a.firstTs, a.lastTs);
     elements.push({
       data: {
         id, label: `+${a.accounts.size.toLocaleString('en-US')}`, full: `${a.dir === 'in' ? 'รับจาก' : 'โอนให้'}คู่บัญชีอื่นอีก ${a.accounts.size.toLocaleString('en-US')} บัญชี รวม ${fmtBaht(a.total)} บาท (${a.count.toLocaleString('en-US')} รายการ)`,
@@ -391,10 +448,10 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
     });
     elements.push({
       data: {
-        id: 'ea' + n++, source: a.dir === 'in' ? id : a.owner, target: a.dir === 'in' ? a.owner : id, total: a.total, count: a.count, width: edgeWidth(a.total),
-        color: a.dir === 'in' ? pal.inflow : pal.outflow, label: `${fmtBaht(a.total)} ฿ ×${a.count}`,
+        id: 'ea' + n++, source: src, target: dst, total: a.total, count: a.count, width: edgeWidth(a.total),
+        color: a.dir === 'in' ? pal.inflow : pal.outflow, ...L.data,
       },
-      classes: 'agg-edge',
+      classes: ['agg-edge', ...L.cls].join(' '),
     });
   }
 
@@ -461,6 +518,18 @@ export function makeStyle(pal: Palette): StylesheetJson {
       },
     },
     { selector: 'node.owner[photo]', style: { 'border-width': 6 } },
+    // ไอคอนธนาคาร (ตัวย่อในวงกลมสีของจุด)
+    { selector: 'node[badge]', style: { 'background-image': 'data(badge)', 'background-fit': 'cover', 'background-clip': 'node' } },
+    // ข้อความที่ผู้สืบสวนวางบนผัง
+    {
+      selector: 'node.note',
+      style: {
+        shape: 'round-rectangle', width: 'data(w)', height: 'data(h)', 'background-color': pal.noteBg, 'background-opacity': 0.96,
+        'border-width': 1.5, 'border-style': 'dashed', 'border-color': pal.warn, label: 'data(label)', color: pal.noteText,
+        'text-valign': 'center', 'text-halign': 'center', 'text-margin-y': 0, 'text-wrap': 'wrap', 'text-max-width': 'data(tw)',
+        'font-size': 11, 'text-outline-width': 0, 'underlay-opacity': 0, 'z-index': 60, 'min-zoomed-font-size': 0,
+      },
+    },
     {
       selector: 'edge',
       style: {
@@ -471,10 +540,20 @@ export function makeStyle(pal: Palette): StylesheetJson {
     },
     { selector: 'edge.agg-edge', style: { 'line-style': 'dashed', opacity: 0.42 } },
     { selector: 'edge.manual-link', style: { 'line-style': 'dashed', 'target-arrow-shape': 'none', label: 'data(label)', opacity: 0.9 } },
+    // ป้ายยอดเงินบนทุกเส้น / เส้นที่ปักไว้ / แบบการ์ด (กล่องมีขอบ หลายบรรทัด)
+    { selector: 'edge.lbl-plain, edge.lbl-pin', style: { label: 'data(label)', opacity: 0.8, color: pal.text, 'font-size': 9.5 } },
+    {
+      selector: 'edge.lbl-card',
+      style: {
+        label: 'data(card)', 'text-wrap': 'wrap', opacity: 0.85, color: pal.text, 'font-size': 9.5, 'text-background-color': pal.surface,
+        'text-background-opacity': 1, 'text-background-shape': 'round-rectangle', 'text-background-padding': '4px',
+        'text-border-width': 1, 'text-border-color': 'data(color)', 'text-border-opacity': 0.9,
+      },
+    },
     { selector: '.faded', style: { opacity: 0.1, 'underlay-opacity': 0 } },
     { selector: 'node.hl', style: { 'border-color': pal.accent, 'border-width': 4, 'underlay-opacity': 0.4, 'z-index': 40 } },
     { selector: 'edge.hl', style: { opacity: 0.95, label: 'data(label)', 'z-index': 40 } },
-    { selector: 'node.hov', style: { label: 'data(full)', 'font-size': 12, 'z-index': 999, 'min-zoomed-font-size': 0, 'text-valign': 'bottom', 'text-margin-y': 6 } },
+    { selector: 'node.hov[kind != "note"]', style: { label: 'data(full)', 'font-size': 12, 'z-index': 999, 'min-zoomed-font-size': 0, 'text-valign': 'bottom', 'text-margin-y': 6 } },
     { selector: 'node:selected', style: { 'border-color': pal.accent, 'border-width': 5 } },
   ] as unknown as StylesheetJson;
 }
@@ -709,6 +788,44 @@ export function hashSignature(elements: ElementDefinition[]): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
+// ---------- ข้อความบนผัง (โน้ต) ----------
+
+const NOTE_WRAP = 28;
+/** ขนาดกล่องโน้ตตามข้อความ (ตัดบรรทัดที่ ~28 ตัวอักษร) */
+export function noteSize(text: string): { w: number; h: number } {
+  const lines: string[] = [];
+  for (const raw of (text || ' ').split('\n')) {
+    let line = raw;
+    while (line.length > NOTE_WRAP) { lines.push(line.slice(0, NOTE_WRAP)); line = line.slice(NOTE_WRAP); }
+    lines.push(line);
+  }
+  const longest = Math.max(...lines.map((l) => l.length), 4);
+  return { w: Math.round(Math.min(240, Math.max(70, longest * 7 + 26))), h: Math.round(lines.length * 15 + 18) };
+}
+
+/** โน้ตเป็น element ของ Cytoscape ที่ตำแหน่งของรูปแบบนั้น (ไม่มี → ตำแหน่งของรูปแบบอื่น) — ไม่รวมใน graphSignature/การจัดวาง */
+export function noteElements(notes: NetNote[] | undefined, mode: LayoutMode): ElementDefinition[] {
+  return (notes ?? []).map((nt) => {
+    const { w, h } = noteSize(nt.text);
+    const position = nt.pos[mode] ?? nt.pos.auto ?? nt.pos.concentric ?? { x: 0, y: 0 };
+    return { group: 'nodes', data: { id: 'note:' + nt.id, label: nt.text, w, h, tw: w - 14, size: w, role: 'note', kind: 'note', color: '#eda100' }, position: { ...position }, classes: 'note' };
+  });
+}
+
+/** ใส่/แก้/ลบโน้ตบนผังให้ตรงกับที่บันทึก (ไม่แตะจุดอื่น) */
+export function syncNotes(cy: cytoscapeNS.Core, notes: NetNote[] | undefined, mode: LayoutMode): void {
+  const want = noteElements(notes, mode);
+  const ids = new Set(want.map((e) => e.data.id as string));
+  cy.batch(() => {
+    cy.nodes('.note').forEach((n) => { if (!ids.has(n.id())) n.remove(); });
+    for (const def of want) {
+      const ele = cy.getElementById(def.data.id as string);
+      if (ele.empty()) cy.add(def);
+      else { ele.data(def.data); ele.position(def.position!); }
+    }
+  });
+}
+
 export type LayoutPlan =
   | { kind: 'preset'; positions: Record<string, Pos> }
   | { kind: 'fcose'; fixed: { nodeId: string; position: Pos }[]; reused: boolean }
@@ -730,18 +847,19 @@ export function planLayout(mode: LayoutMode, elements: ElementDefinition[], save
 
 /** วางจุดตามแผน (คืนเมื่อจัดเสร็จ) */
 export function runLayoutPlan(cy: cytoscapeNS.Core, plan: LayoutPlan, nodeCount: number, animate = false): Promise<void> {
+  const graph = cy.elements().not('.note'); // โน้ตอยู่ที่ที่ผู้สืบสวนวางไว้ ไม่ถูกจัดวาง
   if (plan.kind === 'preset') {
-    cy.batch(() => cy.nodes().forEach((n) => { const p = plan.positions[n.id()]; if (p) n.position({ x: p.x, y: p.y }); }));
+    cy.batch(() => graph.nodes().forEach((n) => { const p = plan.positions[n.id()]; if (p) n.position({ x: p.x, y: p.y }); }));
     return Promise.resolve();
   }
   let layout;
   if (plan.kind === 'concentric') {
-    const pos = concentricPositions(cy.nodes().map((n) => ({
+    const pos = concentricPositions(graph.nodes().map((n) => ({
       id: n.id(), role: n.data('role') as string, anchor: n.data('anchor') as number | undefined, size: n.data('size') as number | undefined, ring: n.data('ring') as number | undefined,
     })));
-    layout = cy.layout({ name: 'preset', positions: (n: cytoscapeNS.NodeSingular) => pos[n.id()] ?? n.position(), animate, animationDuration: 450, fit: false } as never);
+    layout = graph.nodes().layout({ name: 'preset', positions: (n: cytoscapeNS.NodeSingular) => pos[n.id()] ?? n.position(), animate, animationDuration: 450, fit: false } as never);
   } else {
-    layout = cy.layout(layoutOptions(nodeCount, animate, plan.fixed) as never);
+    layout = graph.layout(layoutOptions(nodeCount, animate, plan.fixed) as never);
   }
   return new Promise((resolve) => { layout.one('layoutstop', () => resolve()); layout.run(); });
 }
@@ -749,16 +867,17 @@ export function runLayoutPlan(cy: cytoscapeNS.Core, plan: LayoutPlan, nodeCount:
 /** ตำแหน่งปัจจุบันของทุกจุด (ปัดทศนิยม 1 ตำแหน่ง) สำหรับบันทึกในคดี — ผังใหญ่เกินไม่บันทึก */
 export const MAX_SAVED_NODES = 2000;
 export function snapshotPositions(cy: cytoscapeNS.Core, sig: string, manual: boolean): SavedPositions | null {
-  if (cy.nodes().length > MAX_SAVED_NODES) return null;
+  const graph = cy.nodes().not('.note');
+  if (graph.length > MAX_SAVED_NODES) return null;
   const nodes: Record<string, Pos> = {};
-  cy.nodes().forEach((n) => { const p = n.position(); nodes[n.id()] = { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 }; });
+  graph.forEach((n) => { const p = n.position(); nodes[n.id()] = { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 }; });
   return { sig, nodes, ...(manual ? { manual: true } : {}) };
 }
 
 /** สร้างภาพเครือข่าย PNG (พื้นสว่าง เหมาะกับการพิมพ์) สำหรับรายงาน */
 export async function renderNetworkImage(
   d: Derived, res: AnalysisResult, st: CaseState, opts: Partial<NetOptions> = {}, size = { w: 1500, h: 950 },
-  layout: { mode: LayoutMode; saved?: SavedPositions } = { mode: 'auto' },
+  layout: { mode: LayoutMode; saved?: SavedPositions; notes?: NetNote[] } = { mode: 'auto' },
 ): Promise<{
   dataUrl: string; nodeCount: number; edgeCount: number; legend: BuiltGraph['legend']; summary: string;
   layout: LayoutMode; usedSavedPositions: boolean; manualPositions: boolean;
@@ -776,9 +895,10 @@ export async function renderNetworkImage(
     // ใช้ตำแหน่ง/รูปแบบเดียวกับที่ผู้สืบสวนจัดไว้บนหน้าเครือข่าย
     const plan = planLayout(layout.mode, built.elements, layout.saved);
     await runLayoutPlan(cy, plan, built.nodeCount);
+    if (layout.notes?.length) cy.add(noteElements(layout.notes, layout.mode));
     fitInView(cy, { top: 30, right: 30, bottom: 30, left: 30 });
     // รูปบุคคลโหลดแบบ async ใน Cytoscape — รอให้โหลดเสร็จก่อนถ่ายภาพ ไม่เช่นนั้นภาพในรายงานจะไม่มีรูป
-    const photos = built.elements.map((e) => e.data.photo as string | undefined).filter((p): p is string => !!p);
+    const photos = built.elements.flatMap((e) => [e.data.photo, e.data.badge] as (string | undefined)[]).filter((p): p is string => !!p);
     if (photos.length) {
       await Promise.all(photos.map((src) => { const im = new Image(); im.src = src; return im.decode().catch(() => undefined); }));
       await new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 120)));

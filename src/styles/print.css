@@ -63,3 +63,6 @@
   .rpt-cover { min-height: 255mm; }
   .report-controls, .no-print { display: none !important; }
 }
+.rpt-notes { margin: 4px 0 12px; font-size: 9.4pt; break-inside: avoid; page-break-inside: avoid; }
+.rpt-notes ol { margin: 4px 0 0; padding-left: 22px; }
+.rpt-notes li { margin: 2px 0; white-space: pre-wrap; }

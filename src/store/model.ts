@@ -56,6 +56,19 @@ export interface NetworkViewOptions {
   /** ช่วงวันที่ (YYYY-MM-DD) */
   from?: string;
   to?: string;
+  /** ป้ายยอดเงินบนเส้น: ไม่แสดง (ดูตอนชี้) / ทุกเส้น / ทุกเส้นแบบการ์ด */
+  edgeLabels?: 'off' | 'plain' | 'card';
+  /** ตัวย่อธนาคารในวงกลมของทุกจุดบัญชี */
+  bankBadges?: boolean;
+  /** เส้นที่ปักให้แสดงรายละเอียดตลอด (คีย์ "ต้นทาง>ปลายทาง") */
+  pinnedEdges?: string[];
+}
+
+/** ข้อความที่ผู้สืบสวนวางบนผัง — ตำแหน่งแยกตามรูปแบบการจัดผัง */
+export interface NetNote {
+  id: string;
+  text: string;
+  pos: Partial<Record<LayoutMode, { x: number; y: number }>>;
 }
 
 export interface SavedPositions {
@@ -71,6 +84,7 @@ export interface NetworkView {
   options: NetworkViewOptions;
   /** ตำแหน่งที่ลากเอง แยกตามรูปแบบการจัดผัง */
   positions?: Partial<Record<LayoutMode, SavedPositions>>;
+  notes?: NetNote[];
 }
 
 export const DEFAULT_NETWORK_OPTIONS: NetworkViewOptions = {

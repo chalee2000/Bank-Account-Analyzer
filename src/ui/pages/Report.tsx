@@ -54,7 +54,7 @@ export function ReportPage() {
     // ใช้มุมมองที่จัดไว้บนหน้าเครือข่าย (ตัวกรอง รูปแบบ ตำแหน่ง) — คดีที่ไม่เคยจัดใช้ค่าเริ่มต้นเดียวกับหน้าเครือข่าย
     const view = st.networkView;
     const mode = view?.layout ?? 'auto';
-    renderNetworkImage(d, res, st, { ...netOptionsFromView(view?.options ?? DEFAULT_NETWORK_OPTIONS, res), showPhotos: opts.networkPhotos }, undefined, { mode, saved: view?.positions?.[mode] })
+    renderNetworkImage(d, res, st, { ...netOptionsFromView(view?.options ?? DEFAULT_NETWORK_OPTIONS, res), showPhotos: opts.networkPhotos }, undefined, { mode, saved: view?.positions?.[mode], notes: view?.notes })
       .then((r) => { if (!cancelled) setNet(r); })
       .catch((e) => { console.error(e); if (!cancelled) setNet(null); })
       .finally(() => !cancelled && setNetBusy(false));

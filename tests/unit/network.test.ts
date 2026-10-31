@@ -5,8 +5,9 @@ import { buildDemoCase } from '../../src/demo';
 import { deriveCase } from '../../src/store/model';
 import { analyze } from '../../src/analysis';
 import {
-  autoMinAmount, buildElements, computeFit, concentricPositions, fitInView, graphSignature, hashSignature, netOptionsFromView,
-  ownerLabelScale, ownerRing, ownerRingRadius, planLayout, PRINT_PALETTE, snapshotPositions, updateElementsInPlace, type NetOptions,
+  autoMinAmount, badgeTextColor, bankBadge, buildElements, computeFit, concentricPositions, fitInView, graphSignature, hashSignature, netOptionsFromView,
+  noteElements, noteSize, ownerLabelScale, ownerRing, ownerRingRadius, planLayout, PRINT_PALETTE, runLayoutPlan, snapshotPositions, syncNotes,
+  updateElementsInPlace, type NetOptions,
 } from '../../src/ui/network/graph';
 import type { ElementDefinition } from 'cytoscape';
 
@@ -395,5 +396,153 @@ describe('ผังเครือข่าย: จำตำแหน่งท�
     const sum = buildElements(derived, result, state, { ...o, showManual: false }, PRINT_PALETTE).summary;
     expect(sum).toContain('ช่วงวันที่');
     expect(build().summary).not.toContain('ช่วงวันที่');
+  });
+});
+
+describe('ผังเครือข่าย: ป้ายเส้น ไอคอนธนาคาร และข้อความบนผัง (เมนูคลิกขวา)', () => {
+  const g0 = build();
+  const money = (g: ReturnType<typeof build>) => edges(g).filter((e) => !String(e.classes ?? '').includes('manual-link'));
+  const cls = (e: ElementDefinition) => String(e.classes ?? '').split(/\s+/).filter(Boolean);
+
+  it('ปิดป้ายเส้น (ค่าเริ่มต้น) → ไม่มีคลาสป้าย; ปกติ/การ์ด → ทุกเส้นเงินได้คลาสตามโหมด', () => {
+    expect(money(g0).every((e) => !cls(e).some((c) => c.startsWith('lbl-')))).toBe(true);
+    expect(money(build({ edgeLabels: 'plain' })).every((e) => cls(e).includes('lbl-plain'))).toBe(true);
+    expect(money(build({ edgeLabels: 'card' })).every((e) => cls(e).includes('lbl-card') && !cls(e).includes('lbl-plain'))).toBe(true);
+    // เส้นสรุปยังมีคลาสเดิม
+    expect(edges(build({ edgeLabels: 'card' })).filter((e) => cls(e).includes('agg-edge')).every((e) => cls(e).includes('lbl-card'))).toBe(true);
+  });
+
+  it('การ์ดบอกยอด จำนวนรายการ และช่วงวันที่จริงของคู่บัญชี; ป้ายปกติบอกยอด×จำนวน', () => {
+    const g = build({ edgeLabels: 'card' });
+    const e = money(g).find((x) => !cls(x).includes('agg-edge'))!;
+    const p = result.pairs.find((x) => x.from === e.data.source && x.to === e.data.target)!;
+    const lines = String(e.data.card).split('\n');
+    expect(lines[0]).toMatch(/฿$/);
+    expect(lines[1]).toBe(`${p.count.toLocaleString('en-US')} รายการ`);
+    expect(lines.length).toBe(3);
+    expect(lines[2]).toMatch(/\d/);
+    expect(String(e.data.label)).toMatch(new RegExp(`×${p.count}$`));
+    expect(e.data.key).toBe(`${p.from}>${p.to}`);
+  });
+
+  it('ปักเส้นเดียว → เฉพาะเส้นนั้นแสดงป้าย (โหมดการ์ดใช้แบบการ์ด)', () => {
+    const key = String(money(g0)[0]!.data.key);
+    const g = build({ pinnedEdges: [key] });
+    const pinned = money(g).filter((e) => cls(e).includes('lbl-pin'));
+    expect(pinned.map((e) => e.data.key)).toEqual([key]);
+    const gc = build({ edgeLabels: 'card', pinnedEdges: [key] });
+    expect(money(gc).find((e) => e.data.key === key)!.classes).toContain('lbl-card');
+    expect(money(gc).some((e) => cls(e).includes('lbl-pin'))).toBe(false);
+  });
+
+  it('ไอคอนธนาคารเฉพาะจุดบัญชีที่รู้ธนาคาร ไม่ทับรูปบุคคล และจุดใหญ่พออ่านตัวย่อ', () => {
+    const g = build({ bankBadges: true, showCash: true });
+    const withBadge = nodes(g).filter((n) => n.data.badge);
+    expect(withBadge.length).toBeGreaterThan(0);
+    for (const n of withBadge) {
+      expect(n.data.kind).toBe('account');
+      expect(n.data.bank).not.toBe('');
+      expect(n.data.size as number).toBeGreaterThanOrEqual(30);
+      expect(String(n.data.badge)).toMatch(/^data:image\/svg\+xml/);
+    }
+    expect(nodes(g).filter((n) => n.data.kind !== 'account').every((n) => !n.data.badge)).toBe(true);
+    // จุดที่มีรูปบุคคลใช้รูปบุคคล
+    const id = withBadge[0]!.data.id as string;
+    const st = { ...state, accountNotes: { [id]: { photo: 'data:image/jpeg;base64,/9j/AAAA' } } };
+    const gp = buildElements(deriveCase(st), result, st, { ...base, bankBadges: true, showPhotos: true }, PRINT_PALETTE);
+    const n = nodes(gp).find((x) => x.data.id === id)!;
+    expect(n.data.photo).toBeTruthy();
+    expect(n.data.badge).toBeUndefined();
+  });
+
+  it('ตัวอักษรบนไอคอนอ่านได้: ความต่างของสีกับพื้นไม่ต่ำกว่า 4.5:1 ทั้งพื้นสว่างและเข้ม และตัดอักขระอันตรายใน SVG', () => {
+    const lum = (hex: string) => {
+      const n = parseInt(hex.slice(1), 16);
+      const f = (c: number) => { const x = c / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+      return 0.2126 * f((n >> 16) & 255) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255);
+    };
+    const ratio = (a: string, b: string) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x! + 0.05) / (y! + 0.05); };
+    for (const fill of ['#ffffff', '#fff4c2', '#eda100', '#3987e5', '#1d6b3f', '#7a2fb5', '#141414', '#9aa0a6']) {
+      expect(ratio(badgeTextColor(fill), fill)).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(badgeTextColor('#000000')).toBe('#ffffff');
+    expect(badgeTextColor('#ffffff')).toBe('#141414');
+    expect(decodeURIComponent(bankBadge('<b>&"x\'', '#3987e5'))).not.toMatch(/<b>|&"/);
+  });
+
+  it('สลับป้ายเส้น/ปักเส้น/ไอคอน ไม่เปลี่ยนโครงสร้างผัง (อัปเดตในที่เดิม ไม่จัดวางใหม่)', () => {
+    const sig = graphSignature(g0.elements);
+    const hash = hashSignature(g0.elements);
+    for (const o of [{ edgeLabels: 'plain' as const }, { edgeLabels: 'card' as const }, { bankBadges: true }, { pinnedEdges: [String(money(g0)[0]!.data.key)] }]) {
+      const g = build(o);
+      expect(graphSignature(g.elements)).toBe(sig);
+      expect(hashSignature(g.elements)).toBe(hash);
+    }
+    // updateElementsInPlace ใส่คลาสป้ายและรูปไอคอน โดยตำแหน่งเดิม
+    const cy = cytoscape({ headless: true, styleEnabled: false, elements: structuredClone(g0.elements) });
+    cy.nodes().forEach((n, i) => { n.position({ x: i * 7, y: i * 3 }); });
+    const before = cy.nodes().map((n) => ({ ...n.position() }));
+    updateElementsInPlace(cy, build({ edgeLabels: 'card', bankBadges: true }).elements);
+    expect(cy.nodes().map((n) => ({ ...n.position() }))).toEqual(before);
+    expect(cy.edges('.lbl-card').length).toBe(money(g0).length);
+    expect(cy.nodes('[badge]').length).toBeGreaterThan(0);
+    updateElementsInPlace(cy, g0.elements);
+    expect(cy.edges('.lbl-card').length).toBe(0);
+    expect(cy.nodes('[badge]').length).toBe(0);
+    cy.destroy();
+  });
+
+  it('noteSize: กว้างตามข้อความในกรอบ 70–240 px สูงตามจำนวนบรรทัด (ตัดบรรทัดยาว)', () => {
+    const s1 = noteSize('สั้น');
+    expect(s1.w).toBeGreaterThanOrEqual(70);
+    const long = noteSize('ก'.repeat(100));
+    expect(long.w).toBeLessThanOrEqual(240);
+    expect(long.h).toBeGreaterThan(s1.h);
+    expect(noteSize('a\nb\nc').h).toBeGreaterThan(noteSize('a').h);
+  });
+
+  it('โน้ตใช้ตำแหน่งของรูปแบบนั้น (ไม่มีก็ใช้ของอีกรูปแบบ) และ syncNotes เพิ่ม/แก้/ลบโดยไม่แตะจุดอื่น', () => {
+    const notes = [
+      { id: 'n1', text: 'ข้อความทดสอบ 1', pos: { auto: { x: 10, y: 20 }, concentric: { x: -5, y: -6 } } },
+      { id: 'n2', text: 'ข้อความทดสอบ 2', pos: { auto: { x: 100, y: 200 } } },
+    ];
+    expect(noteElements(notes, 'concentric').map((e) => e.position)).toEqual([{ x: -5, y: -6 }, { x: 100, y: 200 }]);
+    expect(noteElements(notes, 'auto')[0]!.classes).toBe('note');
+    const cy = cytoscape({ headless: true, styleEnabled: false, elements: structuredClone(g0.elements) });
+    const graphCount = cy.nodes().length;
+    syncNotes(cy, notes, 'auto');
+    expect(cy.nodes('.note').length).toBe(2);
+    expect(cy.getElementById('note:n2').position()).toEqual({ x: 100, y: 200 });
+    syncNotes(cy, [{ ...notes[0]!, text: 'แก้แล้ว' }], 'auto');
+    expect(cy.nodes('.note').length).toBe(1);
+    expect(cy.getElementById('note:n1').data('label')).toBe('แก้แล้ว');
+    expect(cy.nodes().not('.note').length).toBe(graphCount);
+    syncNotes(cy, undefined, 'auto');
+    expect(cy.nodes('.note').length).toBe(0);
+    cy.destroy();
+  });
+
+  it('การจัดวางและการบันทึกตำแหน่งไม่แตะโน้ต', async () => {
+    const cy = cytoscape({ headless: true, styleEnabled: false, elements: structuredClone(g0.elements) });
+    syncNotes(cy, [{ id: 'n1', text: 'โน้ต', pos: { concentric: { x: 9999, y: -9999 } } }], 'concentric');
+    await runLayoutPlan(cy, { kind: 'concentric' }, g0.nodeCount);
+    expect(cy.getElementById('note:n1').position()).toEqual({ x: 9999, y: -9999 });
+    const snap = snapshotPositions(cy, 'x', false)!;
+    expect(Object.keys(snap.nodes).some((k) => k.startsWith('note:'))).toBe(false);
+    expect(Object.keys(snap.nodes).length).toBe(cy.nodes().not('.note').length);
+    const all = Object.fromEntries(cy.nodes().not('.note').map((n) => [n.id(), { x: 1, y: 2 }]));
+    await runLayoutPlan(cy, { kind: 'preset', positions: all }, g0.nodeCount);
+    expect(cy.getElementById('note:n1').position()).toEqual({ x: 9999, y: -9999 });
+    cy.destroy();
+  });
+
+  it('ตัวเลือกที่บันทึก (ป้ายเส้น/ไอคอน/ปักเส้น) แปลงเป็นตัวเลือกผัง และค่าเริ่มต้นคือปิด', () => {
+    const v = { scope: 'core' as const, topPerOwner: 12, colorBy: 'role' as const, showCash: true, showManual: true };
+    const o0 = netOptionsFromView(v, result);
+    expect(o0.edgeLabels).toBe('off');
+    expect(o0.bankBadges).toBe(false);
+    expect(o0.pinnedEdges).toEqual([]);
+    const o1 = netOptionsFromView({ ...v, edgeLabels: 'card', bankBadges: true, pinnedEdges: ['a>b'] }, result);
+    expect([o1.edgeLabels, o1.bankBadges, o1.pinnedEdges]).toEqual(['card', true, ['a>b']]);
   });
 });

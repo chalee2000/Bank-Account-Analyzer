@@ -37,6 +37,7 @@
   --glow-a: #e5e0ff;
   --glow-b: #d3f3ed;
   --net-plain: #8795bd; --net-cash: #9aa0bd; --net-agg: #c3c9e2;
+  --note-bg: #fff4c2; --note-text: #3d3000;
   --radius: 14px;
   --radius-sm: 8px;
   --row-h: 34px;
@@ -66,6 +67,7 @@
     --shadow-2: 0 16px 44px rgb(0 0 0 / 60%), 0 0 0 1px var(--border);
     --glow-a: #1d1a4a; --glow-b: #0f2f35;
     --net-plain: #8c99c9; --net-cash: #6d739f; --net-agg: #3a3f6e;
+    --note-bg: #4a4220; --note-text: #fff3c4;
     --tone-violet: #9b86ff; --tone-blue: #6aa6ff; --tone-teal: #2dd4bf; --tone-pink: #f472b6; --tone-indigo: #8b8cff; --tone-sky: #38bdf8;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
     --q1: #0d366b; --q2: #104281; --q3: #184f95; --q4: #1c5cab; --q5: #2a78d6; --q6: #5598e7; --q7: #9ec5f4;
@@ -86,6 +88,7 @@
   --shadow-2: 0 16px 44px rgb(0 0 0 / 60%), 0 0 0 1px var(--border);
   --glow-a: #1d1a4a; --glow-b: #0f2f35;
   --net-plain: #8c99c9; --net-cash: #6d739f; --net-agg: #3a3f6e;
+  --note-bg: #4a4220; --note-text: #fff3c4;
   --tone-violet: #9b86ff; --tone-blue: #6aa6ff; --tone-teal: #2dd4bf; --tone-pink: #f472b6; --tone-indigo: #8b8cff; --tone-sky: #38bdf8;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
   --q1: #0d366b; --q2: #104281; --q3: #184f95; --q4: #1c5cab; --q5: #2a78d6; --q6: #5598e7; --q7: #9ec5f4;
@@ -349,6 +352,10 @@ table.tbl { border-collapse: separate; border-spacing: 0; width: 100%; font-size
 /* กดค้างบนผังในจอสัมผัส: ไม่ให้ iOS เด้งเมนูคัดลอก/เลือกข้อความแทนเมนูของแอป */
 .net-canvas [role='img'] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 
+/* ป้ายบอกโหมดเลือก (ลากกรอบเลือกหลายจุด) */
+.net-mode { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; padding: 6px 12px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; box-shadow: var(--shadow-1); display: flex; gap: 8px; align-items: center; }
+.net-mode button { border: 0; background: rgb(255 255 255 / 22%); color: inherit; border-radius: 999px; padding: 2px 8px; font: inherit; cursor: pointer; }
+
 /* เมนูคลิกขวา/กดค้างที่จุดบัญชี */
 .ctx-menu { position: absolute; z-index: 20; min-width: 230px; max-width: min(320px, calc(100% - 16px)); padding: 6px; background: var(--surface-1); border-radius: 12px; box-shadow: var(--shadow-2); display: flex; flex-direction: column; }
 .ctx-menu::before { content: ''; height: 3px; margin: -6px -6px 6px; border-radius: 12px 12px 0 0; background: var(--grad-brand); }
@@ -356,6 +363,12 @@ table.tbl { border-collapse: separate; border-spacing: 0; width: 100%; font-size
 .ctx-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; min-height: 40px; border: 0; border-radius: 8px; background: transparent; color: var(--text-1); font: inherit; text-align: left; cursor: pointer; }
 .ctx-menu button:hover, .ctx-menu button:focus-visible { background: color-mix(in srgb, var(--accent) 12%, transparent); outline: none; }
 .ctx-menu button.danger { color: var(--critical); }
+.ctx-menu .ctx-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+.ctx-menu .ctx-check { width: 16px; display: inline-grid; place-items: center; color: var(--accent); flex: none; }
+.ctx-menu .ctx-key { margin-left: auto; font-size: 11px; color: var(--text-3); padding-left: 12px; }
+@media (pointer: coarse) { .ctx-menu .ctx-key.kbd { display: none; } }
+.ctx-menu .ctx-sub { padding-left: 22px; }
+.ctx-menu .ctx-head.edge { color: var(--text-1); font-weight: 600; }
 
 /* รูปบุคคล */
 .person-photo { display: inline-grid; place-items: center; flex: none; border-radius: 50%; object-fit: cover; background: var(--surface-2); color: var(--text-3); box-shadow: 0 0 0 3px var(--surface-1), 0 0 0 5px color-mix(in srgb, var(--accent) 45%, transparent); }
