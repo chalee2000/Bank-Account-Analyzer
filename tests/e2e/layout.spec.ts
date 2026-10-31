@@ -139,11 +139,11 @@ test('ผังไหลเงิน: เส้นมุมฉาก 3 ส่ว
   const info = await page.evaluate((sel) => {
     const cy = (document.querySelector(sel) as any).__cy;
     const col = (c: string) => cy.nodes(`[fcol = "${c}"]`).map((n: any) => n.position('x')) as number[];
-    const es = cy.edges('.flow').map((e: any) => ({
+    const es = cy.edges('.flow').not('.elabel').map((e: any) => ({
       h: e.hasClass('flow-h'), back: e.hasClass('flow-back'), s: { ...e.source().position() }, t: { ...e.target().position() },
       seg: e.segmentPoints() as { x: number; y: number }[], pill: String(e.data('pillText')),
     }));
-    return { src: col('src'), hub: col('hub'), sink: col('sink'), owners: cy.nodes('.owner').map((n: any) => n.data('fcol')), es, labelled: cy.edges('.lbl-plain').length };
+    return { src: col('src'), hub: col('hub'), sink: col('sink'), owners: cy.nodes('.owner').map((n: any) => n.data('fcol')), es, labelled: cy.edges('.lbl-plain').not('.elabel').length };
   }, HOST);
   // 3 ส่วน: ซ้าย < ขั้นบันได (เลนไม่ซ้ำ) < ขวา; เจ้าของทุกรายอยู่ขั้นบันได
   expect(info.owners.every((c: string) => c === 'hub')).toBe(true);
@@ -163,14 +163,85 @@ test('ผังไหลเงิน: เส้นมุมฉาก 3 ส่ว
   expect(info.labelled).toBeGreaterThan(5);
   await page.screenshot({ path: shot('layout-flow') });
 
-  // เมนูคลิกขวา: จัดวาง ▸ แสดงว่าใช้ผังไหลเงินอยู่
-  const box = (await page.locator(HOST).boundingBox())!;
-  await page.mouse.click(box.x + box.width - 30, box.y + 40, { button: 'right' });
+  // ป้ายยอดเงินอยู่บนเส้นเสมอ: ทุกเส้นที่มีป้ายมี "เส้นพาป้าย" ที่มองไม่เห็นเส้น วาดหลังเส้นเงินทุกเส้น และคลิกทะลุได้
+  const carriers = () => page.evaluate((sel) => {
+    const cy = (document.querySelector(sel) as any).__cy;
+    const orig = cy.edges('.flow').not('.elabel');
+    const maxZ = Math.max(...orig.map((e: any) => e.pstyle('z-index').value));
+    const cs = cy.edges('.elabel');
+    return {
+      n: cs.length, labelled: orig.filter((e: any) => e.hasClass('lbl-plain') || e.hasClass('lbl-pin') || e.hasClass('lbl-card')).length,
+      above: cs.every((c: any) => c.pstyle('z-index').value > maxZ), invisible: cs.every((c: any) => c.pstyle('line-opacity').value === 0),
+      noEvents: cs.every((c: any) => c.pstyle('events').strValue === 'no'),
+      paired: cs.every((c: any) => { const e = cy.getElementById(String(c.id()).slice(4)); return e.nonempty() && e.source().same(c.source()) && e.target().same(c.target()); }),
+      card: cs.filter((c: any) => c.hasClass('lbl-card')).length,
+    };
+  }, HOST);
+  let cr = await carriers();
+  expect(cr.n).toBe(cr.labelled);
+  expect(cr.n).toBeGreaterThan(5);
+  expect([cr.above, cr.invisible, cr.noEvents, cr.paired]).toEqual([true, true, true, true]);
+
+  // คลิกขวาที่ป้ายบนเส้น → ได้เมนูของเส้น (เส้นพาป้ายไม่บังการคลิก)
+  const pillAt = await page.evaluate((sel) => {
+    const host = document.querySelector(sel) as any;
+    const cy = host.__cy;
+    const r = host.getBoundingClientRect();
+    const pan = cy.pan();
+    const z = cy.zoom();
+    for (const c of cy.edges('.elabel').toArray()) {
+      const bb = c.boundingBox({ includeNodes: false, includeEdges: false, includeLabels: true, includeMainLabels: false, includeSourceLabels: true, includeTargetLabels: true });
+      if (!bb || !isFinite(bb.x1) || bb.w === 0) continue;
+      const x = r.left + ((bb.x1 + bb.x2) / 2) * z + pan.x;
+      const y = r.top + ((bb.y1 + bb.y2) / 2) * z + pan.y;
+      const hit = document.elementFromPoint(x, y);
+      if (hit && host.contains(hit)) return { x, y };
+    }
+    return null;
+  }, HOST);
+  expect(pillAt, 'ต้องมีป้ายบนเส้นที่อยู่ในจอ').not.toBeNull();
+  await page.mouse.click(pillAt!.x, pillAt!.y, { button: 'right' });
+  await expect(page.getByRole('menu', { name: 'เมนูของเส้น' })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // เมนูคลิกขวาที่พื้นที่ว่าง: จัดวาง ▸ แสดงว่าใช้ผังไหลเงินอยู่ / เปลี่ยนเป็นแบบการ์ดแล้วเส้นพาป้ายตามไปด้วย
+  const blank = await page.evaluate((sel) => {
+    const host = document.querySelector(sel) as any;
+    const cy = host.__cy;
+    const r = host.getBoundingClientRect();
+    const pan = cy.pan();
+    const z = cy.zoom();
+    for (let fy = 0.1; fy < 0.9; fy += 0.04) {
+      for (let fx = 0.3; fx < 0.98; fx += 0.03) {
+        const rx = r.width * fx;
+        const ry = r.height * fy;
+        const hit = document.elementFromPoint(r.left + rx, r.top + ry);
+        if (!hit || !host.contains(hit)) continue;
+        if (cy.renderer().findNearestElements((Math.round(r.left + rx) - r.left - pan.x) / z, (Math.round(r.top + ry) - r.top - pan.y) / z, true, true).length) continue;
+        if (cy.nodes().some((n: any) => { const p = n.renderedPosition(); return Math.hypot(p.x - rx, p.y - ry) < 60; })) continue;
+        return { x: Math.round(r.left + rx), y: Math.round(r.top + ry) };
+      }
+    }
+    return null;
+  }, HOST);
+  expect(blank, 'ต้องมีพื้นที่ว่างบนผัง').not.toBeNull();
+  await page.mouse.click(blank!.x, blank!.y, { button: 'right' });
   const menu = page.getByRole('menu', { name: 'เมนูของผัง' });
   await expect(menu).toBeVisible();
   await menu.getByRole('menuitem', { name: /^จัดวาง/ }).click();
   await expect(menu.getByRole('menuitemradio', { name: 'ผังไหลเงิน: เส้นมุมฉาก' })).toHaveAttribute('aria-checked', 'true');
-  await page.keyboard.press('Escape');
+  await menu.getByRole('menuitemcheckbox', { name: 'แสดงรายละเอียดเส้นเงินทุกเส้น แบบการ์ด' }).click();
+  await expect.poll(async () => (await carriers()).card).toBeGreaterThan(5);
+  cr = await carriers();
+  expect(cr.card).toBe(cr.n);
+  expect([cr.n === cr.labelled, cr.above, cr.invisible, cr.paired]).toEqual([true, true, true, true]);
+  await page.screenshot({ path: shot('layout-flow-card') });
+
+  // ผังไหลเงินเปิดที่ซูมอ่านตัวเลขได้ (ผังยาวเห็นแค่ส่วนบนซ้าย) — กด "พอดีจอ" เพื่อเห็นทั้งผัง
+  const zoomBefore = await page.evaluate((sel) => (document.querySelector(sel) as any).__cy.zoom() as number, HOST);
+  expect(zoomBefore).toBeGreaterThanOrEqual(0.79);
+  await page.getByRole('button', { name: 'พอดีจอ', exact: true }).click();
+  await page.waitForTimeout(300);
 
   // ลากผู้รับรายหนึ่ง → รีโหลด → ยังเป็นผังไหลเงินและอยู่ที่เดิม
   const t = await page.evaluate((sel) => {

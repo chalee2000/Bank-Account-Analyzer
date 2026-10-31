@@ -41,9 +41,9 @@ async function blankSpot(page: Page) {
         const ry = r.height * fy;
         const hit = document.elementFromPoint(r.left + rx, r.top + ry);
         if (!hit || !host.contains(hit)) continue;
-        if (cy.renderer().findNearestElements((rx - pan.x) / z, (ry - pan.y) / z, true, false).length) continue;
+        if (cy.renderer().findNearestElements((Math.round(r.left + rx) - r.left - pan.x) / z, (Math.round(r.top + ry) - r.top - pan.y) / z, true, true).length) continue;
         if (cy.nodes().some((n: any) => { const p = n.renderedPosition(); return Math.hypot(p.x - rx, p.y - ry) < 70; })) continue;
-        return { x: r.left + rx, y: r.top + ry };
+        return { x: Math.round(r.left + rx), y: Math.round(r.top + ry) };
       }
     }
     return null;

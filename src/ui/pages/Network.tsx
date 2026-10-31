@@ -5,7 +5,7 @@ import { accounts, analysis, cs, derived, go, labelOf, notify, openInspector, pa
 import { fmtBaht, fmtInt } from '../../core/thai';
 import {
   autoMinAmount, buildElements, fitInView, graphSignature, hashSignature, livePalette, loadCytoscape, makeStyle, netOptionsFromView, ownerRing,
-  flowGlyphs, planLayout, runLayoutPlan, snapshotPositions, syncNotes, updateElementsInPlace, type Insets, type LayoutPlan, type LegendItem,
+  fitFlowView, flowRefresh, planLayout, runLayoutPlan, snapshotPositions, syncNotes, updateElementsInPlace, type Insets, type LayoutPlan, type LegendItem,
 } from '../network/graph';
 import { Empty, Field, Modal, Seg, saveBlob } from '../common';
 import { Icon } from '../icons';
@@ -205,7 +205,7 @@ export function NetworkPage() {
       cy.on('dragfree', 'node', (ev) => {
         const n = ev.target;
         if (n.hasClass('note')) dragged.current.notes.add((n.id() as string).slice(5));
-        else { dragged.current.nodes = true; flowGlyphs(cy!); }
+        else { dragged.current.nodes = true; flowRefresh(cy!); }
         clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(flushDrag, 300);
       });
@@ -222,7 +222,7 @@ export function NetworkPage() {
     const sig = layoutMode + '#' + (focus ?? '') + '#' + graphSignature(built.elements);
     if (sig === sigRef.current && cy.elements().nonempty()) {
       updateElementsInPlace(cy, built.elements);
-      flowGlyphs(cy);
+      flowRefresh(cy);
       return;
     }
     sigRef.current = sig;
@@ -252,7 +252,7 @@ export function NetworkPage() {
           return;
         }
       }
-      fitInView(cy, viewInsets());
+      autoFit(cy);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [built, ready, focus, layoutMode]);
@@ -292,7 +292,7 @@ export function NetworkPage() {
   useEffect(() => {
     if (firstPanel.current) { firstPanel.current = false; return; }
     const cy = cyRef.current;
-    if (cy && ready) fitInView(cy, viewInsets());
+    if (cy && ready) autoFit(cy);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelOpen]);
 
@@ -314,13 +314,15 @@ export function NetworkPage() {
     const my = ++runSeq.current;
     void runLayoutPlan(cy, plan, built.nodeCount, true).then(() => {
       if (my !== runSeq.current) return;
-      fitInView(cy, viewInsets());
+      autoFit(cy);
       persistPositions(false);
     });
   };
   const savedPos = st.networkView?.positions?.[layoutMode];
   const manualActive = !focus && !!savedPos?.manual && savedPos.sig === builtHash;
   const fit = () => { if (cyRef.current) fitInView(cyRef.current, viewInsets()); };
+  /** จัดให้พอดีหลังจัดวาง/เปิด-ปิดแผง: ผังไหลเงินไม่ย่อจนอ่านตัวเลขไม่ได้ */
+  const autoFit = (cy: Core) => (live.current.mode === 'flow' ? fitFlowView(cy, viewInsets()) : fitInView(cy, viewInsets()));
   const exportPng = async () => {
     const cy = cyRef.current;
     if (!cy) return;
