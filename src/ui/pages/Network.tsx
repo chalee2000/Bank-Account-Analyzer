@@ -5,7 +5,7 @@ import { accounts, analysis, cs, derived, go, labelOf, notify, openInspector, pa
 import { fmtBaht, fmtInt } from '../../core/thai';
 import {
   autoMinAmount, buildElements, fitInView, graphSignature, hashSignature, livePalette, loadCytoscape, makeStyle, netOptionsFromView, ownerRing,
-  planLayout, runLayoutPlan, snapshotPositions, syncNotes, updateElementsInPlace, type Insets, type LayoutPlan, type LegendItem,
+  flowGlyphs, planLayout, runLayoutPlan, snapshotPositions, syncNotes, updateElementsInPlace, type Insets, type LayoutPlan, type LegendItem,
 } from '../network/graph';
 import { Empty, Field, Modal, Seg, saveBlob } from '../common';
 import { Icon } from '../icons';
@@ -21,7 +21,12 @@ type NoteMenuState = { id: string; x: number; y: number };
 type NoteEdit = { id?: string; text: string; model?: { x: number; y: number } };
 
 const MIN_OPTIONS = [0, 1_000, 10_000, 50_000, 100_000, 500_000, 1_000_000];
-const LAYOUTS: { value: LayoutMode; label: string }[] = [{ value: 'auto', label: 'อัตโนมัติ' }, { value: 'concentric', label: 'วงซ้อน: เจ้าของอยู่กลาง' }];
+/** label = ชื่อเต็ม (เมนูคลิกขวา), short = ชื่อบนปุ่มในแผงเครื่องมือ, hint = คำอธิบายใต้ปุ่ม */
+const LAYOUTS: { value: LayoutMode; label: string; short: string; hint: string }[] = [
+  { value: 'auto', label: 'อัตโนมัติ', short: 'อัตโนมัติ', hint: 'จัดตามแรงดึงดูด เจ้าของ Statement วางบนวงรี' },
+  { value: 'concentric', label: 'วงซ้อน: เจ้าของอยู่กลาง', short: 'วงซ้อน', hint: 'เจ้าของ Statement วงใน บัญชีร่วมวงถัดมา คู่บัญชีวงนอก' },
+  { value: 'flow', label: 'ผังไหลเงิน: เส้นมุมฉาก', short: 'ผังไหลเงิน', hint: 'ผู้โอนเข้าซ้าย → บัญชีเจ้าของ/ทางผ่านเป็นขั้นบันได → ผู้รับขวา เส้นหักมุมฉาก' },
+];
 
 export function NetworkPage() {
   const res = analysis.value;
@@ -56,9 +61,14 @@ export function NetworkPage() {
 
   const built = useMemo(() => {
     if (!res || !d) return null;
-    return buildElements(d, res, st, { ...netOptionsFromView(opt, res), focus: focus ? focus.split(',').filter(Boolean) : undefined }, livePalette());
+    return buildElements(d, res, st, { ...netOptionsFromView(opt, res), focus: focus ? focus.split(',').filter(Boolean) : undefined, flow: layoutMode === 'flow' }, livePalette());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [res, d, st.manualNodes, st.manualLinks, st.accountNotes, opt, focus, theme.value]);
+  }, [res, d, st.manualNodes, st.manualLinks, st.accountNotes, opt, focus, theme.value, layoutMode]);
+  /** เลือกรูปแบบการจัดผัง — ผังไหลเงินเปิดป้ายบนเส้นให้ (ถ้ายังปิดอยู่) ให้เห็นยอด/จำนวนครั้ง/ทิศทางแบบผังไหลเงินทั่วไป */
+  const chooseLayout = (m: LayoutMode) => {
+    setLayoutMode(m);
+    if (m === 'flow' && (opt.edgeLabels ?? 'off') === 'off') setOpt({ edgeLabels: 'plain' });
+  };
   const builtHash = useMemo(() => (built ? hashSignature(built.elements) : ''), [built]);
 
   // ค่าล่าสุดสำหรับ handler ของ Cytoscape (ผูกครั้งเดียวตอนสร้าง)
@@ -195,7 +205,7 @@ export function NetworkPage() {
       cy.on('dragfree', 'node', (ev) => {
         const n = ev.target;
         if (n.hasClass('note')) dragged.current.notes.add((n.id() as string).slice(5));
-        else dragged.current.nodes = true;
+        else { dragged.current.nodes = true; flowGlyphs(cy!); }
         clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(flushDrag, 300);
       });
@@ -212,6 +222,7 @@ export function NetworkPage() {
     const sig = layoutMode + '#' + (focus ?? '') + '#' + graphSignature(built.elements);
     if (sig === sigRef.current && cy.elements().nonempty()) {
       updateElementsInPlace(cy, built.elements);
+      flowGlyphs(cy);
       return;
     }
     sigRef.current = sig;
@@ -299,7 +310,7 @@ export function NetworkPage() {
   const relayout = () => {
     const cy = cyRef.current;
     if (!cy || !built || built.nodeCount === 0) return;
-    const plan: LayoutPlan = layoutMode === 'concentric' ? { kind: 'concentric' } : { kind: 'fcose', fixed: ownerRing(built.elements), reused: false };
+    const plan: LayoutPlan = layoutMode === 'concentric' ? { kind: 'concentric' } : layoutMode === 'flow' ? { kind: 'flow' } : { kind: 'fcose', fixed: ownerRing(built.elements), reused: false };
     const my = ++runSeq.current;
     void runLayoutPlan(cy, plan, built.nodeCount, true).then(() => {
       if (my !== runSeq.current) return;
@@ -333,7 +344,7 @@ export function NetworkPage() {
               togglePin: (key) => { const list = opt.pinnedEdges ?? []; setOpt({ pinnedEdges: list.includes(key) ? list.filter((k) => k !== key) : [...list, key] }); },
               selectAll: () => cyRef.current?.nodes().select(),
               toggleHand: () => setHandMode((h) => !h),
-              setLayout: setLayoutMode,
+              setLayout: chooseLayout,
               relayout,
               fit,
               toggleBadges: () => setOpt({ bankBadges: !opt.bankBadges }),
@@ -358,7 +369,8 @@ export function NetworkPage() {
                 <Seg value={scope} onChange={(v) => setOpt({ scope: v })} options={[{ value: 'core', label: 'แกนหลัก' }, { value: 'all', label: 'ทุกบัญชี' }]} />
               </Field>
               <Field group label="รูปแบบการจัดผัง">
-                <Seg value={layoutMode} onChange={setLayoutMode} options={LAYOUTS} />
+                <Seg value={layoutMode} onChange={chooseLayout} options={LAYOUTS.map((l) => ({ value: l.value, label: l.short }))} />
+                <div class="tiny muted">{LAYOUTS.find((l) => l.value === layoutMode)?.hint}</div>
               </Field>
               <Field group label="ระบายสีตาม">
                 <Seg value={colorBy} onChange={(v) => setOpt({ colorBy: v })} options={[{ value: 'role', label: 'บทบาท' }, { value: 'bank', label: 'ธนาคาร' }, { value: 'community', label: 'ชุมชน' }]} />

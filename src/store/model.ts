@@ -43,7 +43,7 @@ export interface CaseState {
   networkView?: NetworkView;
 }
 
-export type LayoutMode = 'auto' | 'concentric';
+export type LayoutMode = 'auto' | 'concentric' | 'flow';
 
 export interface NetworkViewOptions {
   scope: 'core' | 'all';

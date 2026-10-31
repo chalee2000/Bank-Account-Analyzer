@@ -5,7 +5,8 @@ import { buildDemoCase } from '../../src/demo';
 import { deriveCase } from '../../src/store/model';
 import { analyze } from '../../src/analysis';
 import {
-  autoMinAmount, badgeTextColor, bankBadge, buildElements, computeFit, concentricPositions, fitInView, graphSignature, hashSignature, netOptionsFromView,
+  autoMinAmount, badgeTextColor, bankBadge, buildElements, computeFit, concentricPositions, fitInView, FLOW_GEOM, flowGlyph, flowGlyphs, flowLabelOffset,
+  flowPill, flowPositions, flowRoles, flowRoute, graphSignature, hashSignature, netOptionsFromView,
   noteElements, noteSize, ownerLabelScale, ownerRing, ownerRingRadius, planLayout, PRINT_PALETTE, runLayoutPlan, snapshotPositions, syncNotes,
   updateElementsInPlace, type NetOptions,
 } from '../../src/ui/network/graph';
@@ -544,5 +545,127 @@ describe('ผังเครือข่าย: ป้ายเส้น ไอ�
     expect(o0.pinnedEdges).toEqual([]);
     const o1 = netOptionsFromView({ ...v, edgeLabels: 'card', bankBadges: true, pinnedEdges: ['a>b'] }, result);
     expect([o1.edgeLabels, o1.bankBadges, o1.pinnedEdges]).toEqual(['card', true, ['a>b']]);
+  });
+});
+
+describe('ผังไหลเงิน (เส้นมุมฉาก)', () => {
+  const g = build({ flow: true, showCash: true, topPerOwner: 3 });
+  const fnodes = nodes(g).map((n) => ({
+    id: n.data.id as string, role: n.data.role as string, size: n.data.size as number, label: n.data.label as string,
+    fs: n.data.fs as number, tw: n.data.tw as number | undefined, ring: n.data.ring as number | undefined,
+  }));
+  const fedges = edges(g).filter((e) => !String(e.classes ?? '').includes('manual-link'))
+    .map((e) => ({ source: e.data.source as string, target: e.data.target as string, total: e.data.total as number }));
+  const pos = flowPositions(fnodes, fedges);
+  const col = flowRoles(fnodes.map((n) => n.id), fedges, (id) => fnodes.find((n) => n.id === id)?.role === 'owner');
+  const ofCol = (c: string) => fnodes.filter((n) => col.get(n.id) === c).map((n) => n.id);
+
+  it('แบ่ง 3 ส่วน: ผู้โอนเข้า x = 0 < ทุกเลนกลาง (ไม่ซ้ำกัน) < ผู้รับ; เจ้าของอยู่ขั้นบันไดเสมอ; จุดสรุป "+N" เข้าอยู่ซ้าย ออกอยู่ขวา', () => {
+    const hubs = ofCol('hub');
+    const srcs = ofCol('src');
+    const sinks = ofCol('sink');
+    expect(srcs.length).toBeGreaterThan(0);
+    expect(sinks.length).toBeGreaterThan(0);
+    for (const o of owners) expect(col.get(o)).toBe('hub');
+    const laneXs = hubs.map((id) => pos[id]!.x);
+    expect(new Set(laneXs).size).toBe(hubs.length);
+    const minLane = Math.min(...laneXs);
+    const maxLane = Math.max(...laneXs);
+    for (const id of srcs) expect(pos[id]!.x).toBe(0);
+    expect(minLane).toBeGreaterThan(0);
+    const rightX = pos[sinks[0]!]!.x;
+    for (const id of sinks) expect(pos[id]!.x).toBe(rightX);
+    expect(rightX).toBeGreaterThan(maxLane);
+    const aggIn = fnodes.filter((n) => n.id.startsWith('agg:') && n.id.endsWith(':in'));
+    const aggOut = fnodes.filter((n) => n.id.startsWith('agg:') && n.id.endsWith(':out'));
+    expect(aggIn.length + aggOut.length).toBeGreaterThan(0);
+    for (const n of aggIn) expect(pos[n.id]!.x).toBe(0);
+    for (const n of aggOut) expect(pos[n.id]!.x).toBe(rightX);
+  });
+
+  it('ทุกจุดอยู่คนละแถว ห่างกันไม่ต่ำกว่าขั้นต่ำ; ผู้โอนเข้าเฉพาะรายอยู่เหนือบัญชี ผู้รับเฉพาะรายอยู่ใต้บัญชี', () => {
+    const ys = Object.values(pos).map((p) => p.y).sort((a, b) => a - b);
+    for (let i = 1; i < ys.length; i++) expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(FLOW_GEOM.minRow - 0.01);
+    for (const id of ofCol('src')) {
+      const targets = [...new Set(fedges.filter((e) => e.source === id).map((e) => e.target))];
+      if (targets.length === 1) expect(pos[id]!.y).toBeLessThan(pos[targets[0]!]!.y);
+    }
+    for (const id of ofCol('sink')) {
+      const sources = [...new Set(fedges.filter((e) => e.target === id).map((e) => e.source))];
+      if (sources.length === 1) expect(pos[id]!.y).toBeGreaterThan(pos[sources[0]!]!.y);
+    }
+  });
+
+  it('ขั้นบันไดเรียงตามทิศเงิน: เส้นระหว่างบัญชีในขั้นบันไดส่วนใหญ่ไหลจากเลนซ้ายไปเลนขวา (ตัดวงวนแล้ว)', () => {
+    const hubEdges = fedges.filter((e) => col.get(e.source) === 'hub' && col.get(e.target) === 'hub');
+    expect(hubEdges.length).toBeGreaterThan(0);
+    const forward = hubEdges.filter((e) => pos[e.target]!.x > pos[e.source]!.x).length;
+    expect(forward / hubEdges.length).toBeGreaterThanOrEqual(0.8);
+  });
+
+  it('เส้นจากคอลัมน์ซ้ายเป็น flow-h ที่เหลือ flow-v (ตอนสร้าง); ป้ายแคปซูลปัดบาท + จำนวนครั้ง; เส้นที่เพิ่มเองไม่เป็นมุมฉาก', () => {
+    for (const e of edges(g)) {
+      const cls = String(e.classes ?? '');
+      if (cls.includes('manual-link')) { expect(cls).not.toContain('flow'); continue; }
+      expect(cls).toContain('flow');
+      expect(cls).toContain(col.get(e.data.source as string) === 'src' ? 'flow-h' : 'flow-v');
+      expect(e.data.pill).toBe(flowPill(e.data.total as number, e.data.count as number));
+    }
+    expect(flowPill(12107.4, 38)).toBe('฿12,107 (38×)');
+    expect(flowPill(1999.5, 1200)).toBe('฿2,000 (1,200×)');
+    // ไม่ใช่ผังไหลเงิน → ไม่มีคลาส/ข้อมูลของผังไหลเงิน
+    expect(edges(build()).every((e) => !String(e.classes ?? '').includes('flow') && e.data.pill === undefined)).toBe(true);
+  });
+
+  it('ป้ายเจ้าของมีช่วงวันที่และยอดหมุนเวียน (เฉพาะผังไหลเงิน); โครงสร้างผังเท่ากับรูปแบบอื่น', () => {
+    const o = owners[0]!;
+    const lf = String(nodes(g).find((n) => n.data.id === o)!.data.label);
+    const ln = String(nodes(build({ showCash: true, topPerOwner: 3 })).find((n) => n.data.id === o)!.data.label);
+    expect(lf.startsWith(ln)).toBe(true);
+    expect(lf).toMatch(/หมุนเวียน [\d,]+\.\d\d ฿$/);
+    expect(lf.split('\n').length).toBe(ln.split('\n').length + 2);
+    const plain = build({ showCash: true, topPerOwner: 3 });
+    expect(graphSignature(g.elements)).toBe(graphSignature(plain.elements));
+    expect(hashSignature(g.elements)).toBe(hashSignature(plain.elements));
+  });
+
+  it('ลูกศร เส้นทาง และตำแหน่งป้าย', () => {
+    expect(flowGlyph({ x: 0, y: 0 }, { x: 100, y: 50 })).toBe('▸');
+    expect(flowGlyph({ x: 100, y: 0 }, { x: 0, y: 50 })).toBe('◂');
+    expect(flowGlyph({ x: 0, y: 100 }, { x: 5, y: 0 })).toBe('▴');
+    expect(flowGlyph({ x: 0, y: 0 }, { x: 5, y: 100 })).toBe('▾');
+    expect(flowRoute(true, { x: 0, y: 0 }, { x: 300, y: 100 })).toBe('flow-h');
+    expect(flowRoute(false, { x: 300, y: 0 }, { x: 500, y: 100 })).toBe('flow-v');
+    expect(flowRoute(false, { x: 500, y: 300 }, { x: 300, y: 100 })).toBe('flow-h'); // เงินย้อนไปเลนซ้าย
+    // เข้าบัญชีในขั้นบันได: ป้ายถัดจากจุดเลี้ยว (ไกลจากปลายทาง) / เข้าคอลัมน์ขวา: ใกล้ผู้รับ
+    expect(flowLabelOffset('flow-v', 'hub', { x: 0, y: 0 }, { x: 400, y: 200 }, 60)).toBe(400 - 30 - 72);
+    expect(flowLabelOffset('flow-v', 'hub', { x: 0, y: 0 }, { x: 100, y: 200 }, 60)).toBe(48);
+    expect(flowLabelOffset('flow-v', 'sink', { x: 0, y: 0 }, { x: 900, y: 200 }, 20)).toBe(66);
+  });
+
+  it('runLayoutPlan(flow) วางตาม flowPositions ไม่แตะโน้ต และ flowGlyphs ตั้งเส้นทาง/ลูกศร/ระยะป้ายตามตำแหน่ง', async () => {
+    expect(planLayout('flow', g.elements)).toEqual({ kind: 'flow' });
+    const saved = { sig: hashSignature(g.elements), nodes: Object.fromEntries(fnodes.map((n) => [n.id, { x: 1, y: 2 }])) };
+    expect(planLayout('flow', g.elements, saved).kind).toBe('preset');
+    const cy = cytoscape({ headless: true, styleEnabled: false, elements: structuredClone(g.elements) });
+    syncNotes(cy, [{ id: 'n1', text: 'โน้ต', pos: { flow: { x: -500, y: -500 } } }], 'flow');
+    await runLayoutPlan(cy, { kind: 'flow' }, g.nodeCount);
+    for (const n of fnodes) expect(cy.getElementById(n.id).position()).toEqual(pos[n.id]);
+    expect(cy.getElementById('note:n1').position()).toEqual({ x: -500, y: -500 });
+    cy.edges('.flow').forEach((e) => {
+      const s = e.source().position();
+      const t = e.target().position();
+      const back = e.hasClass('flow-back');
+      expect(e.hasClass(flowRoute(e.source().data('fcol') === 'src', s, t))).toBe(true);
+      expect(String(e.data('pillText'))).toBe(`${e.data('pill')} ${back ? (t.y < s.y ? '▴' : '▾') : flowGlyph(s, t)}`);
+      expect(e.data('toff')).toBeGreaterThan(0);
+    });
+    // ลากจุดปลายทางไปทางซ้ายของต้นทาง → เส้นเปลี่ยนเป็นแนวนอนก่อน และลูกศรเปลี่ยนตาม
+    const e = cy.edges('.flow-v').filter((x) => x.target().data('fcol') === 'sink')[0]!;
+    e.target().position({ x: e.source().position('x') - 300, y: e.target().position('y') });
+    flowGlyphs(cy);
+    expect(e.hasClass('flow-h')).toBe(true);
+    expect(e.hasClass('flow-back')).toBe(true);
+    cy.destroy();
   });
 });

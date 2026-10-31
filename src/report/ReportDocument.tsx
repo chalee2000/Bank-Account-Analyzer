@@ -1,7 +1,7 @@
 // เอกสารรายงานประกอบการสืบสวน (HTML รูปแบบ A4) — ใช้ทั้งแสดงตัวอย่างและพิมพ์/บันทึกเป็น PDF
 import type { ComponentChildren } from 'preact';
 import type { AnalysisResult, Finding, FindingLevel, TraceResult } from '../core/types';
-import type { CaseState, Derived } from '../store/model';
+import type { CaseState, Derived, LayoutMode } from '../store/model';
 import { accountLabel } from '../analysis/ctx';
 import { CLOSING_STATEMENT, LIMITATIONS, ROLE_LABEL, SIGNAL_LABEL, PRIORITY_DISCLAIMER } from '../analysis';
 import { bankDisplay, formatAccountNumber } from '../core/normalize';
@@ -41,7 +41,7 @@ export interface ReportData {
   opts: ReportOptions;
   net: {
     dataUrl: string; nodeCount: number; edgeCount: number; legend: { label: string; color: string }[]; summary?: string;
-    layout?: 'auto' | 'concentric'; manualPositions?: boolean;
+    layout?: LayoutMode; manualPositions?: boolean;
   } | null;
   traces: { label: string; direction: 'forward' | 'backward'; result: TraceResult }[];
   generatedAt: number;
@@ -244,6 +244,7 @@ export function ReportDocument({ data }: { data: ReportData }) {
               <img src={data.net.dataUrl} alt="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี" style="width:100%;border:1px solid #ddd" />
               <figcaption>รูปที่ 3 ผังเครือข่าย {fmtInt(data.net.nodeCount)} จุด {fmtInt(data.net.edgeCount)} เส้น{data.net.summary ? ` (${data.net.summary})` : ''} — ขนาดจุดตามยอดเงินรวม ความหนาเส้นตามยอดโอน วงกลมใหญ่ที่มีวงขาว = เจ้าของ Statement วงกลมเส้นประ = คู่บัญชีอื่นที่รวมไว้ สี่เหลี่ยมเส้นประ = จุดเงินสด เส้นสีเขียว = เงินเข้าเจ้าของ เส้นสีส้ม = เงินออกจากเจ้าของ
                 {data.net.layout === 'concentric' && ' · รูปแบบวงซ้อน: เจ้าของ Statement อยู่วงใน บัญชีร่วมวงถัดมา คู่บัญชีอื่นวงนอก'}
+                {data.net.layout === 'flow' && ' · รูปแบบผังไหลเงิน: ผู้โอนเข้าอยู่คอลัมน์ซ้าย บัญชีเจ้าของ/ทางผ่านเรียงเป็นขั้นบันได (แต่ละบัญชีมีเส้นแนวดิ่งของตัวเอง) ผู้รับอยู่คอลัมน์ขวา ป้ายบนเส้น = ยอดรวมปัดเป็นบาท (จำนวนครั้ง) ลูกศรบอกทิศทางเงิน'}
                 {data.net.manualPositions && ' · จัดตำแหน่งตามที่ผู้สืบสวนจัดไว้บนหน้าเครือข่าย'}
                 {data.net.legend.length > 0 && <> · สี: {data.net.legend.map((l) => <span key={l.label} class="rpt-sw"><i style={{ background: l.color }} />{l.label}</span>)}</>}</figcaption>
             </figure>
