@@ -1,5 +1,5 @@
 import type { ComponentChildren } from 'preact';
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Core, EventObject } from 'cytoscape';
 import { accounts, analysis, cs, derived, go, labelOf, notify, openInspector, patchCase, route, setAccountNote, theme } from '../../state';
 import { fmtBaht, fmtInt } from '../../core/thai';
@@ -10,6 +10,7 @@ import {
 import { Empty, Field, Modal, Seg, saveBlob } from '../common';
 import { Icon } from '../icons';
 import { PersonModal } from '../PersonEditor';
+import { placeMenu } from '../placeMenu';
 import { DEFAULT_NETWORK_OPTIONS, newId, type LayoutMode, type NetNote, type NetworkView, type NetworkViewOptions } from '../../store/model';
 import type { ManualNode } from '../../core/types';
 
@@ -319,7 +320,8 @@ export function NetworkPage() {
 
   return (
     <div class="net-wrap">
-      <div class="net-canvas">
+      {/* คลิกขวาที่ใดในพื้นที่ผังก็ไม่ให้เมนูของเบราว์เซอร์ขึ้น (ยกเว้นช่องกรอกข้อความ ให้ยังคัดลอก/วางได้) */}
+      <div class="net-canvas" onContextMenu={(e) => { if (!(e.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) e.preventDefault(); }}>
         <div ref={host} style="position:absolute;inset:0" role="img" aria-label="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี" onContextMenu={(e) => e.preventDefault()} />
         {menu && <NodeMenuPopup menu={menu} onClose={() => setMenu(null)} onEdit={(id) => { setMenu(null); setPersonId(id); }} />}
         {canvasMenu && (
@@ -428,17 +430,19 @@ export function NetworkPage() {
 /** เมนูลอยบนผัง — วางที่ตำแหน่งที่คลิก แต่ไม่ให้ล้นขอบผัง; ปิดเมื่อคลิกที่อื่นหรือกด Esc */
 function FloatingMenu({ x, y, label, onClose, children }: { x: number; y: number; label: string; onClose: () => void; children: ComponentChildren }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ left: x, top: y });
-  useEffect(() => {
+  // ยังไม่รู้ขนาดเมนู → ซ่อนไว้ก่อน แล้ววางก่อนวาดจอ (ห้ามวางทับตำแหน่งที่คลิก: บน Windows เหตุการณ์ contextmenu
+  // ของเบราว์เซอร์มาหลังปล่อยปุ่ม ถ้าเมนูอยู่ใต้ตัวชี้ เมนูคลิกขวาของเบราว์เซอร์จะเด้งทับ)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
     const el = ref.current;
     const box = el?.parentElement;
     if (el && box) {
-      setPos({
-        left: Math.max(8, Math.min(x + 6, box.clientWidth - el.offsetWidth - 8)),
-        top: Math.max(8, Math.min(y + 6, box.clientHeight - el.offsetHeight - 8)),
-      });
+      setPos(placeMenu({ x, y }, { w: el.offsetWidth, h: el.offsetHeight }, { w: box.clientWidth, h: box.clientHeight }));
       el.querySelector<HTMLButtonElement>('button')?.focus();
     }
+  }, [x, y]);
+  useEffect(() => {
+    const el = ref.current;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     const onDown = (e: PointerEvent) => { if (el && !el.contains(e.target as Node)) onClose(); };
     window.addEventListener('keydown', onKey);
@@ -450,11 +454,16 @@ function FloatingMenu({ x, y, label, onClose, children }: { x: number; y: number
     const el = ref.current;
     const box = el?.parentElement;
     if (!el || !box) return;
-    const ro = new ResizeObserver(() => setPos((p) => ({ ...p, top: Math.max(8, Math.min(p.top, box.clientHeight - el.offsetHeight - 8)) })));
+    const ro = new ResizeObserver(() => setPos((p) => (p ? { ...p, top: Math.max(8, Math.min(p.top, box.clientHeight - el.offsetHeight - 8)) } : p)));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  return <div class="ctx-menu" ref={ref} role="menu" aria-label={label} style={{ left: pos.left + 'px', top: pos.top + 'px' }}>{children}</div>;
+  return (
+    <div
+      class="ctx-menu" ref={ref} role="menu" aria-label={label} onContextMenu={(e) => e.preventDefault()}
+      style={{ left: (pos?.left ?? x + 6) + 'px', top: (pos?.top ?? y + 6) + 'px', visibility: pos ? 'visible' : 'hidden' }}
+    >{children}</div>
+  );
 }
 
 /** เมนูของจุดบัญชี (คลิกขวา/กดค้าง) */

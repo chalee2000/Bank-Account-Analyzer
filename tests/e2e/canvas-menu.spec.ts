@@ -50,14 +50,15 @@ async function blankSpot(page: Page) {
   }, HOST);
 }
 
-/** จุดกึ่งกลางของเส้นเงินระหว่างบัญชี (ไม่ใช่เส้นสรุป) ที่คลิกถึงได้ */
-async function edgeSpot(page: Page) {
+/** จุดกึ่งกลางของเส้นเงินระหว่างบัญชี (ไม่ใช่เส้นสรุป) ที่คลิกถึงได้ — คืนหลายเส้นเผื่อเส้นแรกคลิกไม่โดน (ผังสุ่มตำแหน่งทุกครั้ง) */
+async function edgeSpots(page: Page) {
   return page.evaluate((sel) => {
     const host = document.querySelector(sel) as any;
     const cy = host.__cy;
     const r = host.getBoundingClientRect();
     const pan = cy.pan();
     const z = cy.zoom();
+    const out: { x: number; y: number; src: string; dst: string }[] = [];
     for (const e of cy.edges().not('.agg-edge, .manual-link').toArray()) {
       const m = e.midpoint();
       const rx = m.x * z + pan.x;
@@ -65,9 +66,9 @@ async function edgeSpot(page: Page) {
       const hit = document.elementFromPoint(r.left + rx, r.top + ry);
       if (!hit || !host.contains(hit)) continue;
       const near = cy.renderer().findNearestElements(m.x, m.y, true, false);
-      if (near.length && near[0].id() === e.id()) return { x: r.left + rx, y: r.top + ry, src: e.source().id() as string, dst: e.target().id() as string };
+      if (near.length && near[0].id() === e.id()) out.push({ x: r.left + rx, y: r.top + ry, src: e.source().id() as string, dst: e.target().id() as string });
     }
-    return null;
+    return out.slice(0, 4);
   }, HOST);
 }
 
@@ -116,6 +117,26 @@ test('คลิกขวาที่พื้นที่ว่าง/เส้�
   await page.screenshot({ path: shot('canvas-menu') });
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
+
+  // เมนูคลิกขวาของเบราว์เซอร์ต้องไม่ขึ้นทับ: เมนูไม่อยู่ใต้ตัวชี้ และ contextmenu ในพื้นที่ผัง (รวมบนเมนู/คำอธิบายสี) ถูกยกเลิก
+  // (Playwright ไม่แสดงเมนูของเบราว์เซอร์ จึงตรวจที่ตัวเหตุการณ์แทน)
+  const corner = await page.evaluate((sel) => {
+    const r = (document.querySelector(sel) as HTMLElement).getBoundingClientRect();
+    return { x: Math.round(r.right - 24), y: Math.round(r.bottom - 24) };
+  }, HOST);
+  for (const p of [await blankSpot(page), corner]) {
+    await page.mouse.click(p!.x, p!.y, { button: 'right' });
+    await expect(canvasMenu(page)).toBeVisible();
+    const b = (await canvasMenu(page).boundingBox())!;
+    expect(p!.x >= b.x && p!.x <= b.x + b.width && p!.y >= b.y && p!.y <= b.y + b.height, 'เมนูต้องไม่ทับจุดที่คลิก').toBe(false);
+    const prevented = await page.evaluate(([x, y]) => {
+      const fire = (el: Element | null) => !!el && !el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+      return { atPointer: fire(document.elementFromPoint(x!, y!)), onMenu: fire(document.querySelector('.ctx-menu button')), legend: fire(document.querySelector('.net-legend')) };
+    }, [p!.x, p!.y]);
+    expect(prevented).toEqual({ atPointer: true, onMenu: true, legend: true });
+    await page.keyboard.press('Escape');
+    await expect(canvasMenu(page)).toBeHidden();
+  }
 
   // ป้ายเส้นทุกเส้น → แบบการ์ด → ไอคอนธนาคาร: ไม่จัดผังใหม่
   await openCanvasMenu(page);
@@ -209,10 +230,17 @@ test('คลิกขวาที่พื้นที่ว่าง/เส้�
   await page.keyboard.press('Escape');
 
   // คลิกขวาบนเส้น → คำสั่งของเส้นอยู่ด้านบน → ดูธุรกรรมของคู่บัญชีนั้น
-  const e = await edgeSpot(page);
-  expect(e, 'ต้องมีเส้นที่คลิกขวาได้').not.toBeNull();
-  await page.mouse.click(e!.x, e!.y, { button: 'right' });
+  const spots = await edgeSpots(page);
+  expect(spots.length, 'ต้องมีเส้นที่คลิกขวาได้').toBeGreaterThan(0);
   const edgeMenu = page.getByRole('menu', { name: 'เมนูของเส้น' });
+  let e: (typeof spots)[number] | undefined;
+  for (const c of spots) {
+    await page.mouse.click(c.x, c.y, { button: 'right' });
+    if (await edgeMenu.waitFor({ state: 'visible', timeout: 2000 }).then(() => true, () => false)) { e = c; break; }
+    console.log('คลิกขวาที่เส้นแล้วเมนูไม่ขึ้น ลองเส้นถัดไป', JSON.stringify(c), await page.evaluate(() => document.querySelector('.ctx-menu')?.getAttribute('aria-label') ?? 'ไม่มีเมนู'));
+    await page.keyboard.press('Escape');
+  }
+  expect(e, 'คลิกขวาที่เส้นต้องเปิดเมนูของเส้น').toBeDefined();
   await expect(edgeMenu).toBeVisible();
   await expect(edgeMenu.locator('.ctx-head')).toContainText('→');
   await expect(edgeMenu.getByRole('menuitemcheckbox', { name: 'แสดงรายละเอียดเส้นนี้ตลอด' })).toBeVisible();

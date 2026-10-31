@@ -159,7 +159,7 @@ Holding Time และ Money Trail ใช้การจับคู่ **เข
 ## การทดสอบ
 
 ```bash
-npm test                  # Vitest: 167 ข้อ (core, ingest, รูปแบบธนาคาร, ถอดรหัส Excel, analysis, ผังเครือข่าย/รูปแบบการจัดผัง/ป้ายเส้น/โน้ต, รูปบุคคล, store, Excel)
+npm test                  # Vitest: 171 ข้อ (core, ingest, รูปแบบธนาคาร, ถอดรหัส Excel, analysis, ผังเครือข่าย/รูปแบบการจัดผัง/ป้ายเส้น/โน้ต, รูปบุคคล, store, Excel)
 npm run fixtures          # สร้างไฟล์ Statement สังเคราะห์หลายรูปแบบที่ tests/fixtures/generated/ (ต้องมี Chromium)
 npm run test:e2e          # Playwright: desktop 11 ข้อ + iPhone 2 ข้อ (จำลองด้วย Chromium) — build ใหม่ทุกครั้งก่อนรัน
 npm run check -- <ไฟล์> [รหัสผ่าน]   # ตรวจว่าไฟล์จริงจะถูกอ่านอย่างไร (ไม่ใช่เทสต์)
