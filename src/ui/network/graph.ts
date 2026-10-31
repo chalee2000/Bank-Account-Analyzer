@@ -9,9 +9,9 @@
 import type cytoscapeNS from 'cytoscape';
 import type { ElementDefinition, StylesheetJson } from 'cytoscape';
 import type { Account, AnalysisResult } from '../../core/types';
-import type { CaseState, Derived } from '../../store/model';
+import type { CaseState, Derived, LayoutMode, NetworkViewOptions, SavedPositions } from '../../store/model';
 import { bankDisplay, formatAccountNumber } from '../../core/normalize';
-import { fmtBaht } from '../../core/thai';
+import { fmtBaht, formatThaiDate } from '../../core/thai';
 
 export type ColorBy = 'role' | 'bank' | 'community';
 export type Scope = 'core' | 'all';
@@ -89,6 +89,16 @@ export function autoMinAmount(res: AnalysisResult, maxEdges = 1500): number {
   const totals = res.pairs.map((p) => p.total).sort((a, b) => b - a);
   if (totals.length <= maxEdges) return 0;
   return Math.ceil(totals[maxEdges]!);
+}
+
+/** ตัวกรองที่บันทึกในคดี → ตัวเลือกของ buildElements — หน้าเครือข่ายและรายงานใช้ฟังก์ชันเดียวกัน ผังจึงตรงกันทุกจุด */
+export function netOptionsFromView(v: NetworkViewOptions, res: AnalysisResult): NetOptions {
+  return {
+    scope: v.scope, topPerOwner: v.topPerOwner, colorBy: v.colorBy, showCash: v.showCash, showManual: v.showManual,
+    minAmount: v.scope === 'all' ? (v.allMin ?? autoMinAmount(res)) : 0,
+    from: v.from ? Date.parse(v.from + 'T00:00:00Z') : undefined,
+    to: v.to ? Date.parse(v.to + 'T23:59:59Z') : undefined,
+  };
 }
 
 export interface LegendItem {
@@ -321,6 +331,26 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
     if (fo) return pal.outflow;
     return pal.plain;
   };
+  // เจ้าของที่แต่ละจุดเชื่อมด้วยยอดสูงสุด → ลำดับบนวง (ใช้เรียงคู่บัญชีให้อยู่ส่วนโค้งเดียวกับเจ้าของในวงซ้อน)
+  const linkToOwner = new Map<string, Map<string, number>>();
+  for (const e of keep) {
+    for (const [o, x] of [[e.from, e.to], [e.to, e.from]] as const) {
+      if (!owners.has(o) || owners.has(x)) continue;
+      const m = linkToOwner.get(x) ?? linkToOwner.set(x, new Map()).get(x)!;
+      m.set(o, (m.get(o) ?? 0) + e.total);
+    }
+  }
+  const anchorOf = (id: string): number => {
+    const own = ringOrder.indexOf(id);
+    if (own >= 0) return own;
+    let best = -1;
+    let bt = -1;
+    for (const [o, t] of linkToOwner.get(id) ?? []) {
+      const i = ringOrder.indexOf(o);
+      if (i >= 0 && t > bt) { bt = t; best = i; }
+    }
+    return best >= 0 ? best : ringOrder.length;
+  };
   const elements: ElementDefinition[] = [];
   for (const id of nodeIds) {
     const a = d.accounts[id]!;
@@ -335,7 +365,7 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
     elements.push({
       data: {
         id, label, full, role, kind: a.kind, size, color: colorOf(id), fs: role === 'owner' ? OWNER_LABEL_FONT : role === 'shared' ? 11 : 9.5,
-        hasStatement: a.hasStatement ? 1 : 0, bridge: m?.isBridge ? 1 : 0, bank: a.bank ?? '',
+        hasStatement: a.hasStatement ? 1 : 0, bridge: m?.isBridge ? 1 : 0, bank: a.bank ?? '', anchor: anchorOf(id),
         ...(role === 'owner' ? { ring: ringOrder.indexOf(id), ringN: ringOrder.length, tw: OWNER_LABEL_WIDTH } : {}),
         ...(photo ? { photo } : {}),
       },
@@ -355,6 +385,7 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
       data: {
         id, label: `+${a.accounts.size.toLocaleString('en-US')}`, full: `${a.dir === 'in' ? 'รับจาก' : 'โอนให้'}คู่บัญชีอื่นอีก ${a.accounts.size.toLocaleString('en-US')} บัญชี รวม ${fmtBaht(a.total)} บาท (${a.count.toLocaleString('en-US')} รายการ)`,
         role: 'agg', kind: 'agg', size: 20 + Math.min(16, Math.log10(1 + a.accounts.size) * 7), color: pal.agg, fs: 10, hasStatement: 0, bridge: 0, bank: '', owner: a.owner,
+        anchor: anchorOf(a.owner),
       },
       classes: 'agg',
     });
@@ -369,7 +400,7 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
 
   if (opts.showManual) {
     for (const mn of st.manualNodes) {
-      elements.push({ data: { id: 'm:' + mn.id, label: clip(mn.label, 18), full: mn.label, role: 'manual', kind: 'manual', size: 28, color: pal.warn, fs: 10, hasStatement: 0, bridge: 0, bank: '' }, classes: 'manual' });
+      elements.push({ data: { id: 'm:' + mn.id, label: clip(mn.label, 18), full: mn.label, role: 'manual', kind: 'manual', size: 28, color: pal.warn, fs: 10, hasStatement: 0, bridge: 0, bank: '', anchor: ringOrder.length }, classes: 'manual' });
     }
     const exists = (id: string) => nodeIds.has(id) || st.manualNodes.some((x) => 'm:' + x.id === id);
     st.manualLinks.forEach((l, i) => {
@@ -385,7 +416,8 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
     opts.scope === 'core'
       ? `แกนหลัก: ${nOwners} เจ้าของ Statement · ${used.filter((id) => sharedIds.has(id) && !owners.has(id)).length} บัญชีร่วม · ${used.length - nOwners} บัญชีที่แสดง${hidden ? ` · รวมคู่บัญชีอื่นไว้ในจุดเส้นประอีก ${hidden.toLocaleString('en-US')} บัญชี` : ''}`
       : `ทุกบัญชีที่ยอดโอนรวมตั้งแต่ ${fmtBaht(opts.minAmount)} บาท`;
-  return { elements, nodeCount: nodeIds.size + agg.length, edgeCount: shownEdges.length + agg.length, legend, summary };
+  const range = useRange ? ` · ช่วงวันที่ ${opts.from !== undefined ? formatThaiDate(opts.from) : 'ต้นข้อมูล'} – ${opts.to !== undefined ? formatThaiDate(opts.to) : 'ท้ายข้อมูล'}` : '';
+  return { elements, nodeCount: nodeIds.size + agg.length, edgeCount: shownEdges.length + agg.length, legend, summary: summary + range };
 }
 
 export function makeStyle(pal: Palette): StylesheetJson {
@@ -561,10 +593,176 @@ export const layoutOptions = (nodeCount: number, animate = false, fixed: { nodeI
   ...(fixed.length && nodeCount <= 400 ? { fixedNodeConstraint: fixed } : {}),
 });
 
+// ---------- รูปแบบการจัดผัง ----------
+
+/** วงซ้อน: ระดับสูง = วงใน — เจ้าของ Statement อยู่กลาง บัญชีร่วมวงถัดมา คู่บัญชีวงนอก จุดสรุปเส้นประวงนอกสุด */
+export const CONCENTRIC_LEVEL: Record<string, number> = { owner: 5, shared: 4, plain: 3, cash: 2, manual: 2, agg: 1 };
+
+export interface RingNode { id: string; role: string; anchor?: number; size?: number; ring?: number }
+type Pos = { x: number; y: number };
+
+const OWNER_ARC = 240; // ระยะบนเส้นรอบวงต่อเจ้าของหนึ่งราย — ให้ป้ายชื่อสองบรรทัดของเจ้าของไม่ชนกัน
+const NODE_ARC = 46; // ระยะขั้นต่ำระหว่างจุดในวงนอก
+const RING_GAP = 130; // ระยะห่างระหว่างวง
+const SUB_GAP = 56; // วงย่อยเมื่อจุดในระดับเดียวกันมากเกินกว่าจะวางวงเดียวได้
+const TAU = 2 * Math.PI;
+const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+
+/**
+ * ตำแหน่งแบบวงซ้อน (pure): เจ้าของวงใน (รายเดียว = กลางพอดี) แล้วระดับถัด ๆ ไปเป็นวงรอบนอก
+ * คู่บัญชีแต่ละกลุ่ม (ตามเจ้าของที่เชื่อมด้วยยอดสูงสุด) ได้ส่วนโค้งตามจำนวน และหมุนให้ตรงกับมุมของเจ้าของ
+ * — เงินของเจ้าของแต่ละรายจึง "แผ่ออก" ไปด้านเดียวกัน เส้นไม่พาดข้ามผัง; จุดเยอะเกินวงเดียวจะสลับวงย่อยแทนการซ้อนกัน
+ */
+export function concentricPositions(nodes: RingNode[]): Record<string, Pos> {
+  const out: Record<string, Pos> = {};
+  const level = (n: RingNode) => CONCENTRIC_LEVEL[n.role] ?? 2;
+  const owners = nodes.filter((n) => level(n) === 5).sort((a, b) => (a.ring ?? a.anchor ?? 0) - (b.ring ?? b.anchor ?? 0));
+  const nO = owners.length;
+  const ownerAngle = new Map<number, number>();
+  const R0 = nO <= 1 ? 0 : Math.max(160, (nO * OWNER_ARC) / TAU);
+  owners.forEach((o, i) => {
+    const a = -Math.PI / 2 + (TAU * i) / Math.max(1, nO);
+    ownerAngle.set(o.anchor ?? i, a);
+    out[o.id] = { x: Math.cos(a) * R0, y: Math.sin(a) * R0 };
+  });
+
+  let r = R0;
+  const levels = [...new Set(nodes.map(level))].filter((l) => l < 5).sort((a, b) => b - a);
+  for (const l of levels) {
+    const ring = nodes.filter((n) => level(n) === l)
+      .sort((a, b) => (a.anchor ?? 1e9) - (b.anchor ?? 1e9) || (b.size ?? 0) - (a.size ?? 0));
+    const count = ring.length;
+    r = r === 0 ? RING_GAP + 40 : r + RING_GAP;
+    // จุดมากเกินวงเดียว → สลับวงย่อย (จุดที่ติดกันอยู่คนละวงย่อย) ระยะเชิงมุมจึงแคบลงได้โดยไม่ซ้อน
+    const subRings = Math.max(1, Math.ceil((count * NODE_ARC) / (TAU * r)));
+    const place = (n: RingNode, a: number, sub: number) => {
+      const rr = r + sub * SUB_GAP;
+      out[n.id] = { x: Math.cos(a) * rr, y: Math.sin(a) * rr };
+    };
+    if (nO >= 2 && subRings === 1) {
+      // วงโปร่ง: คู่บัญชีของเจ้าของแต่ละรายรวมเป็นกลุ่ม วางกึ่งกลางกลุ่มที่มุมของเจ้าของ แล้วดันกลุ่มที่ทับกันออกจากกัน
+      const minAng = NODE_ARC / r;
+      const step = Math.max(minAng, Math.min(TAU / count, minAng * 1.8));
+      const groups: { target?: number; items: RingNode[]; c: number; w: number }[] = [];
+      for (const n of ring) {
+        const t = ownerAngle.get(n.anchor ?? -1);
+        const last = groups[groups.length - 1];
+        if (last && last.target === t) last.items.push(n);
+        else groups.push({ target: t, items: [n], c: 0, w: 0 });
+      }
+      const total = groups.reduce((a, g) => a + g.items.length * step, 0);
+      const k = total > TAU ? TAU / total : 1;
+      let prev = -Math.PI / 2;
+      for (const g of groups) { // มุมเป้าหมายเรียงจากน้อยไปมากตามลำดับเจ้าของ; กลุ่มที่ไม่มีเจ้าของต่อท้าย
+        g.w = g.items.length * step * k;
+        g.c = g.target !== undefined ? Math.max(g.target, prev + g.w / 2) : prev + g.w / 2;
+        prev = g.c + g.w / 2;
+      }
+      for (let it = 0; it < 300 && groups.length > 1; it++) {
+        let moved = false;
+        for (let i = 0; i < groups.length; i++) {
+          const a = groups[i]!;
+          const b = groups[(i + 1) % groups.length]!;
+          const bc = i + 1 === groups.length ? b.c + TAU : b.c;
+          const overlap = (a.w + b.w) / 2 - (bc - a.c);
+          if (overlap > 1e-9) { a.c -= overlap / 2; b.c += overlap / 2; moved = true; }
+        }
+        if (!moved) break;
+      }
+      for (const g of groups) g.items.forEach((n, j) => place(n, g.c - g.w / 2 + (g.w * (j + 0.5)) / g.items.length, 0));
+    } else {
+      // เจ้าของรายเดียว/ไม่มี หรือวงแน่น: ช่องเท่ากันเต็มวง (จำนวนช่องปัดเป็นพหุคูณของวงย่อย ช่องที่ติดกันจึงอยู่คนละวงย่อยแม้ข้ามรอบวง)
+      const slots = Math.ceil(count / subRings) * subRings;
+      let rot = -Math.PI / 2;
+      if (nO >= 2) {
+        // หมุนทั้งวงให้คู่บัญชีโดยรวมตรงกับมุมของเจ้าของ (ค่าเฉลี่ยแบบวงกลม)
+        let sx = 0;
+        let sy = 0;
+        ring.forEach((n, i) => {
+          const t = ownerAngle.get(n.anchor ?? -1);
+          if (t === undefined) return;
+          const d = wrap(t - (TAU * i) / slots);
+          sx += Math.cos(d);
+          sy += Math.sin(d);
+        });
+        if (sx !== 0 || sy !== 0) rot = Math.atan2(sy, sx);
+      }
+      ring.forEach((n, i) => place(n, rot + (TAU * i) / slots, i % subRings));
+    }
+    r += (subRings - 1) * SUB_GAP;
+  }
+  return out;
+}
+
+/** แฮชสั้นของโครงสร้างผัง (cyrb53) — เก็บในคดีแทนสตริงยาว */
+export function hashSignature(elements: ElementDefinition[]): string {
+  const str = graphSignature(elements);
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+export type LayoutPlan =
+  | { kind: 'preset'; positions: Record<string, Pos> }
+  | { kind: 'fcose'; fixed: { nodeId: string; position: Pos }[]; reused: boolean }
+  | { kind: 'concentric' };
+
+/**
+ * เลือกวิธีวางจุด: ผังเหมือนตอนบันทึก → ใช้ตำแหน่งเดิมทั้งหมด (ตรงกับที่ผู้สืบสวนจัดไว้);
+ * ผังเปลี่ยน (เช่น นำเข้าไฟล์เพิ่ม/เปลี่ยนตัวกรอง) ในโหมดอัตโนมัติ → ล็อกจุดที่เคยวางไว้ แล้วจัดเฉพาะจุดใหม่;
+ * นอกนั้นจัดใหม่ตามรูปแบบ (อัตโนมัติ: เจ้าของบนวงรีตายตัว)
+ */
+export function planLayout(mode: LayoutMode, elements: ElementDefinition[], saved?: SavedPositions): LayoutPlan {
+  const ids = elements.filter((e) => !('source' in e.data)).map((e) => e.data.id as string);
+  if (saved && saved.sig === hashSignature(elements) && ids.every((id) => saved.nodes[id])) return { kind: 'preset', positions: saved.nodes };
+  if (mode === 'concentric') return { kind: 'concentric' };
+  const kept = saved ? ids.filter((id) => saved.nodes[id]).map((id) => ({ nodeId: id, position: saved.nodes[id]! })) : [];
+  if (kept.length >= 2) return { kind: 'fcose', fixed: kept, reused: true };
+  return { kind: 'fcose', fixed: ownerRing(elements), reused: false };
+}
+
+/** วางจุดตามแผน (คืนเมื่อจัดเสร็จ) */
+export function runLayoutPlan(cy: cytoscapeNS.Core, plan: LayoutPlan, nodeCount: number, animate = false): Promise<void> {
+  if (plan.kind === 'preset') {
+    cy.batch(() => cy.nodes().forEach((n) => { const p = plan.positions[n.id()]; if (p) n.position({ x: p.x, y: p.y }); }));
+    return Promise.resolve();
+  }
+  let layout;
+  if (plan.kind === 'concentric') {
+    const pos = concentricPositions(cy.nodes().map((n) => ({
+      id: n.id(), role: n.data('role') as string, anchor: n.data('anchor') as number | undefined, size: n.data('size') as number | undefined, ring: n.data('ring') as number | undefined,
+    })));
+    layout = cy.layout({ name: 'preset', positions: (n: cytoscapeNS.NodeSingular) => pos[n.id()] ?? n.position(), animate, animationDuration: 450, fit: false } as never);
+  } else {
+    layout = cy.layout(layoutOptions(nodeCount, animate, plan.fixed) as never);
+  }
+  return new Promise((resolve) => { layout.one('layoutstop', () => resolve()); layout.run(); });
+}
+
+/** ตำแหน่งปัจจุบันของทุกจุด (ปัดทศนิยม 1 ตำแหน่ง) สำหรับบันทึกในคดี — ผังใหญ่เกินไม่บันทึก */
+export const MAX_SAVED_NODES = 2000;
+export function snapshotPositions(cy: cytoscapeNS.Core, sig: string, manual: boolean): SavedPositions | null {
+  if (cy.nodes().length > MAX_SAVED_NODES) return null;
+  const nodes: Record<string, Pos> = {};
+  cy.nodes().forEach((n) => { const p = n.position(); nodes[n.id()] = { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 }; });
+  return { sig, nodes, ...(manual ? { manual: true } : {}) };
+}
+
 /** สร้างภาพเครือข่าย PNG (พื้นสว่าง เหมาะกับการพิมพ์) สำหรับรายงาน */
 export async function renderNetworkImage(
   d: Derived, res: AnalysisResult, st: CaseState, opts: Partial<NetOptions> = {}, size = { w: 1500, h: 950 },
-): Promise<{ dataUrl: string; nodeCount: number; edgeCount: number; legend: BuiltGraph['legend']; summary: string } | null> {
+  layout: { mode: LayoutMode; saved?: SavedPositions } = { mode: 'auto' },
+): Promise<{
+  dataUrl: string; nodeCount: number; edgeCount: number; legend: BuiltGraph['legend']; summary: string;
+  layout: LayoutMode; usedSavedPositions: boolean; manualPositions: boolean;
+} | null> {
   const built = buildElements(d, res, st, {
     scope: 'core', topPerOwner: 12, minAmount: 0, showCash: true, colorBy: 'role', showManual: true, ...opts,
   }, PRINT_PALETTE);
@@ -575,8 +773,9 @@ export async function renderNetworkImage(
   document.body.appendChild(host);
   try {
     const cy = cytoscape({ container: host, elements: built.elements, style: makeStyle(PRINT_PALETTE), layout: { name: 'null' } as never, headless: false });
-    const layout = cy.layout(layoutOptions(built.nodeCount, false, ownerRing(built.elements)) as never);
-    await new Promise<void>((resolve) => { layout.one('layoutstop', () => resolve()); layout.run(); });
+    // ใช้ตำแหน่ง/รูปแบบเดียวกับที่ผู้สืบสวนจัดไว้บนหน้าเครือข่าย
+    const plan = planLayout(layout.mode, built.elements, layout.saved);
+    await runLayoutPlan(cy, plan, built.nodeCount);
     fitInView(cy, { top: 30, right: 30, bottom: 30, left: 30 });
     // รูปบุคคลโหลดแบบ async ใน Cytoscape — รอให้โหลดเสร็จก่อนถ่ายภาพ ไม่เช่นนั้นภาพในรายงานจะไม่มีรูป
     const photos = built.elements.map((e) => e.data.photo as string | undefined).filter((p): p is string => !!p);
@@ -588,7 +787,10 @@ export async function renderNetworkImage(
     }
     const dataUrl = cy.png({ output: 'base64uri', scale: 1.5, bg: '#ffffff', full: false }) as string;
     cy.destroy();
-    return { dataUrl, nodeCount: built.nodeCount, edgeCount: built.edgeCount, legend: built.legend, summary: built.summary };
+    return {
+      dataUrl, nodeCount: built.nodeCount, edgeCount: built.edgeCount, legend: built.legend, summary: built.summary,
+      layout: layout.mode, usedSavedPositions: plan.kind === 'preset', manualPositions: plan.kind === 'preset' && !!layout.saved?.manual,
+    };
   } finally {
     host.remove();
   }

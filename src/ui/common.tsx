@@ -72,14 +72,16 @@ export function Notice(props: { kind?: 'info' | 'warn' | 'crit'; children: Compo
   );
 }
 
-export function Field(props: { label: string; children: ComponentChildren; hint?: string }) {
-  return (
-    <label class="field">
+/** group: ใช้กับกลุ่มปุ่ม (Seg) — ถ้าห่อด้วย <label> ปุ่มแรกจะถูกอ่านชื่อเป็นข้อความทั้งกลุ่มแทนชื่อของตัวเอง */
+export function Field(props: { label: string; children: ComponentChildren; hint?: string; group?: boolean }) {
+  const inner = (
+    <>
       <span>{props.label}</span>
       {props.children}
       {props.hint && <span class="tiny muted">{props.hint}</span>}
-    </label>
+    </>
   );
+  return props.group ? <div class="field" role="group" aria-label={props.label}>{inner}</div> : <label class="field">{inner}</label>;
 }
 
 export function Seg<T extends string>(props: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {

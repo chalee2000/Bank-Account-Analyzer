@@ -3,18 +3,19 @@ import type { Core, EventObject } from 'cytoscape';
 import { accounts, analysis, cs, derived, go, labelOf, notify, openInspector, patchCase, route, setAccountNote, theme } from '../../state';
 import { fmtInt } from '../../core/thai';
 import {
-  autoMinAmount, buildElements, fitInView, graphSignature, layoutOptions, livePalette, loadCytoscape, makeStyle, ownerRing, updateElementsInPlace,
-  type ColorBy, type Insets, type LegendItem, type Scope,
+  autoMinAmount, buildElements, fitInView, graphSignature, hashSignature, livePalette, loadCytoscape, makeStyle, netOptionsFromView, ownerRing,
+  planLayout, runLayoutPlan, snapshotPositions, updateElementsInPlace, type Insets, type LayoutPlan, type LegendItem,
 } from '../network/graph';
 import { Empty, Field, Modal, Seg, saveBlob } from '../common';
 import { Icon } from '../icons';
 import { PersonModal } from '../PersonEditor';
-import { newId } from '../../store/model';
+import { DEFAULT_NETWORK_OPTIONS, newId, type LayoutMode, type NetworkViewOptions } from '../../store/model';
 import type { ManualNode } from '../../core/types';
 
 interface NodeMenu { id: string; x: number; y: number }
 
 const MIN_OPTIONS = [0, 1_000, 10_000, 50_000, 100_000, 500_000, 1_000_000];
+const LAYOUTS: { value: LayoutMode; label: string }[] = [{ value: 'auto', label: 'อัตโนมัติ' }, { value: 'concentric', label: 'วงซ้อน: เจ้าของอยู่กลาง' }];
 
 export function NetworkPage() {
   const res = analysis.value;
@@ -26,15 +27,14 @@ export function NetworkPage() {
   const legendRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const [ready, setReady] = useState(false);
-  const [scope, setScope] = useState<Scope>('core');
-  const [topPerOwner, setTopPerOwner] = useState(12);
-  const [colorBy, setColorBy] = useState<ColorBy>('role');
-  const [minAmount, setMinAmount] = useState(0);
-  const [allMin, setAllMin] = useState(() => (analysis.value ? autoMinAmount(analysis.value) : 0));
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [showCash, setShowCash] = useState(true);
-  const [showManual, setShowManual] = useState(true);
+  // ตัวกรอง + รูปแบบการจัดผัง: เริ่มจากที่บันทึกในคดี (เปิดหน้าใหม่ได้มุมมองเดิม และรายงานใช้มุมมองเดียวกัน)
+  const [opt, setOptState] = useState<NetworkViewOptions>(() => ({ ...DEFAULT_NETWORK_OPTIONS, ...st.networkView?.options }));
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => st.networkView?.layout ?? 'auto');
+  const setOpt = (p: Partial<NetworkViewOptions>) => setOptState((o) => ({ ...o, ...p }));
+  const { scope, topPerOwner, colorBy, showCash, showManual } = opt;
+  const from = opt.from ?? '';
+  const to = opt.to ?? '';
+  const allMin = opt.allMin ?? (res ? autoMinAmount(res) : 0);
   const [panelOpen, setPanelOpen] = useState(typeof window !== 'undefined' ? window.innerWidth > 720 : true);
   const [modal, setModal] = useState<'node' | 'link' | null>(null);
   const [menu, setMenu] = useState<NodeMenu | null>(null);
@@ -44,14 +44,43 @@ export function NetworkPage() {
 
   const built = useMemo(() => {
     if (!res || !d) return null;
-    return buildElements(d, res, st, {
-      scope, topPerOwner, minAmount: scope === 'all' ? allMin : minAmount, colorBy, showCash, showManual,
-      focus: focus ? focus.split(',').filter(Boolean) : undefined,
-      from: from ? Date.parse(from + 'T00:00:00Z') : undefined,
-      to: to ? Date.parse(to + 'T23:59:59Z') : undefined,
-    }, livePalette());
+    return buildElements(d, res, st, { ...netOptionsFromView(opt, res), focus: focus ? focus.split(',').filter(Boolean) : undefined }, livePalette());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [res, d, st.manualNodes, st.manualLinks, st.accountNotes, scope, topPerOwner, minAmount, allMin, colorBy, showCash, showManual, from, to, focus, theme.value]);
+  }, [res, d, st.manualNodes, st.manualLinks, st.accountNotes, opt, focus, theme.value]);
+  const builtHash = useMemo(() => (built ? hashSignature(built.elements) : ''), [built]);
+
+  // ค่าล่าสุดสำหรับ handler ของ Cytoscape (ผูกครั้งเดียวตอนสร้าง)
+  const live = useRef({ mode: layoutMode, opt, focus, hash: builtHash });
+  live.current = { mode: layoutMode, opt, focus, hash: builtHash };
+
+  /** บันทึกตำแหน่งทุกจุดของรูปแบบปัจจุบันลงคดี (ไม่บันทึกมุมมองชั่วคราวจาก "ดูในเครือข่าย") */
+  const persistPositions = (manual: boolean) => {
+    const cy = cyRef.current;
+    const c = cs.peek();
+    const L = live.current;
+    if (!cy || !c || L.focus || cy.nodes().empty()) return;
+    const snap = snapshotPositions(cy, L.hash, manual);
+    const positions = { ...(c.networkView?.positions ?? {}) };
+    if (snap) positions[L.mode] = snap;
+    else delete positions[L.mode];
+    void patchCase({ networkView: { layout: L.mode, options: L.opt, positions } });
+  };
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // บันทึกตัวกรอง/รูปแบบเมื่อเปลี่ยน (หน่วงเล็กน้อย ไม่เขียนถ้าเท่าเดิม)
+  useEffect(() => {
+    const c = cs.peek();
+    if (!c) return;
+    const prev = c.networkView;
+    const same = prev ? prev.layout === layoutMode && JSON.stringify(prev.options) === JSON.stringify(opt)
+      : layoutMode === 'auto' && JSON.stringify(opt) === JSON.stringify(DEFAULT_NETWORK_OPTIONS);
+    if (same) return;
+    const t = setTimeout(() => {
+      const cur = cs.peek();
+      if (cur) void patchCase({ networkView: { layout: layoutMode, options: opt, positions: cur.networkView?.positions } });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [opt, layoutMode]);
 
   /** พื้นที่ที่แผงเครื่องมือ/คำอธิบายสีลอยทับ — ใช้เว้นขอบตอนจัดผังให้พอดี (จอแคบ: แผงเต็มความกว้าง จึงเว้นด้านบนแทน) */
   const viewInsets = (): Insets => {
@@ -110,16 +139,22 @@ export function NetworkPage() {
       });
       cy.on('mouseover', 'edge', (ev) => { if (!ev.target.hasClass('faded')) ev.target.addClass('hl'); });
       cy.on('mouseout', 'edge', (ev) => { ev.target.removeClass('hl'); });
+      // ลากจุดจัดเอง → จำตำแหน่งในคดี
+      cy.on('dragfree', 'node', () => {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(() => persistPositions(true), 300);
+      });
       setReady(true);
     });
-    return () => { disposed = true; cyRef.current = null; sigRef.current = ''; setReady(false); cy?.destroy(); };
+    return () => { disposed = true; clearTimeout(saveTimer.current); cyRef.current = null; sigRef.current = ''; setReady(false); cy?.destroy(); };
   }, [hasData]);
 
-  // ใส่ข้อมูลและจัดวาง — ถ้าโครงสร้างผังเท่าเดิม (เช่น แค่ตั้งชื่อ/ใส่รูป/เปลี่ยนสี) แก้ข้อมูลของจุดเดิม ไม่จัดวางใหม่
+  // ใส่ข้อมูลและจัดวาง — ถ้าโครงสร้างผังและรูปแบบเท่าเดิม (เช่น แค่ตั้งชื่อ/ใส่รูป/เปลี่ยนสี) แก้ข้อมูลของจุดเดิม ไม่จัดวางใหม่
+  const runSeq = useRef(0);
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy || !ready || !built) return;
-    const sig = (focus ?? '') + '#' + graphSignature(built.elements);
+    const sig = layoutMode + '#' + (focus ?? '') + '#' + graphSignature(built.elements);
     if (sig === sigRef.current && cy.elements().nonempty()) {
       updateElementsInPlace(cy, built.elements);
       return;
@@ -131,8 +166,13 @@ export function NetworkPage() {
       cy.add(built.elements);
     });
     if (built.nodeCount === 0) return;
-    const layout = cy.layout(layoutOptions(built.nodeCount, false, ownerRing(built.elements)) as never);
-    layout.one('layoutstop', () => {
+    const saved = cs.peek()?.networkView?.positions?.[layoutMode];
+    const plan = planLayout(layoutMode, built.elements, saved);
+    const my = ++runSeq.current;
+    void runLayoutPlan(cy, plan, built.nodeCount).then(() => {
+      if (my !== runSeq.current || cyRef.current !== cy) return;
+      // ผลจัดอัตโนมัติก็บันทึกด้วย — เปิดหน้าใหม่ได้ผังเดิม และรายงานตรงกับที่เห็น; ถ้าใช้จุดเดิมบางส่วน คงสถานะ "จัดเอง" ไว้
+      if (plan.kind !== 'preset') persistPositions(plan.kind === 'fcose' && plan.reused ? !!saved?.manual : false);
       if (focus) {
         const ids = focus.split(',').filter((x) => cy.getElementById(x).nonempty());
         if (ids.length) {
@@ -147,8 +187,8 @@ export function NetworkPage() {
       }
       fitInView(cy, viewInsets());
     });
-    layout.run();
-  }, [built, ready, focus]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [built, ready, focus, layoutMode]);
 
   // เปิด/ปิดแผงเครื่องมือแล้วจัดผังให้พอดีพื้นที่ใหม่
   const firstPanel = useRef(true);
@@ -169,7 +209,20 @@ export function NetworkPage() {
 
   if (!res || !d) return <Empty title="ยังไม่มีข้อมูล" icon="network">นำเข้า Statement ก่อน</Empty>;
 
-  const relayout = () => cyRef.current?.layout(layoutOptions(built?.nodeCount ?? 0, true, built ? ownerRing(built.elements) : []) as never).run();
+  /** จัดเรียงใหม่ตามรูปแบบที่เลือก และล้างตำแหน่งที่ลากเองของรูปแบบนั้น */
+  const relayout = () => {
+    const cy = cyRef.current;
+    if (!cy || !built || built.nodeCount === 0) return;
+    const plan: LayoutPlan = layoutMode === 'concentric' ? { kind: 'concentric' } : { kind: 'fcose', fixed: ownerRing(built.elements), reused: false };
+    const my = ++runSeq.current;
+    void runLayoutPlan(cy, plan, built.nodeCount, true).then(() => {
+      if (my !== runSeq.current) return;
+      fitInView(cy, viewInsets());
+      persistPositions(false);
+    });
+  };
+  const savedPos = st.networkView?.positions?.[layoutMode];
+  const manualActive = !focus && !!savedPos?.manual && savedPos.sig === builtHash;
   const fit = () => { if (cyRef.current) fitInView(cyRef.current, viewInsets()); };
   const exportPng = async () => {
     const cy = cyRef.current;
@@ -188,34 +241,37 @@ export function NetworkPage() {
           <button class="btn sm" onClick={() => setPanelOpen(!panelOpen)}><Icon name="filter" size={15} />{panelOpen ? 'ซ่อนตัวกรอง' : 'ตัวกรอง / เครื่องมือ'}</button>
           {panelOpen && (
             <div class="card stack" style="padding:12px;gap:10px">
-              <Field label="มุมมอง">
-                <Seg value={scope} onChange={setScope} options={[{ value: 'core', label: 'แกนหลัก' }, { value: 'all', label: 'ทุกบัญชี' }]} />
+              <Field group label="มุมมอง">
+                <Seg value={scope} onChange={(v) => setOpt({ scope: v })} options={[{ value: 'core', label: 'แกนหลัก' }, { value: 'all', label: 'ทุกบัญชี' }]} />
               </Field>
-              <Field label="ระบายสีตาม">
-                <Seg value={colorBy} onChange={setColorBy} options={[{ value: 'role', label: 'บทบาท' }, { value: 'bank', label: 'ธนาคาร' }, { value: 'community', label: 'ชุมชน' }]} />
+              <Field group label="รูปแบบการจัดผัง">
+                <Seg value={layoutMode} onChange={setLayoutMode} options={LAYOUTS} />
+              </Field>
+              <Field group label="ระบายสีตาม">
+                <Seg value={colorBy} onChange={(v) => setOpt({ colorBy: v })} options={[{ value: 'role', label: 'บทบาท' }, { value: 'bank', label: 'ธนาคาร' }, { value: 'community', label: 'ชุมชน' }]} />
               </Field>
               {scope === 'core' ? (
                 <Field label="คู่บัญชีที่แสดงต่อเจ้าของ (ยอดสูงสุด)">
-                  <select class="select sm" value={topPerOwner} onChange={(e) => setTopPerOwner(Number((e.target as HTMLSelectElement).value))}>
+                  <select class="select sm" value={topPerOwner} onChange={(e) => setOpt({ topPerOwner: Number((e.target as HTMLSelectElement).value) })}>
                     {[6, 12, 25, 50, 100].map((v) => <option value={v}>{v} บัญชี</option>)}
                   </select>
                 </Field>
               ) : (
                 <Field label="ยอดโอนรวมระหว่างคู่บัญชี ≥">
-                  <select class="select sm" value={allMin} onChange={(e) => setAllMin(Number((e.target as HTMLSelectElement).value))}>
+                  <select class="select sm" value={allMin} onChange={(e) => setOpt({ allMin: Number((e.target as HTMLSelectElement).value) })}>
                     {[...new Set([...MIN_OPTIONS, allMin])].sort((a, b) => a - b).map((v) => <option value={v}>{v === 0 ? 'ทั้งหมด' : fmtInt(v) + ' บาท'}</option>)}
                   </select>
                 </Field>
               )}
               <div class="row">
-                <Field label="ตั้งแต่"><input class="input sm" type="date" value={from} onChange={(e) => setFrom((e.target as HTMLInputElement).value)} /></Field>
-                <Field label="ถึง"><input class="input sm" type="date" value={to} onChange={(e) => setTo((e.target as HTMLInputElement).value)} /></Field>
+                <Field label="ตั้งแต่"><input class="input sm" type="date" value={from} onChange={(e) => setOpt({ from: (e.target as HTMLInputElement).value || undefined })} /></Field>
+                <Field label="ถึง"><input class="input sm" type="date" value={to} onChange={(e) => setOpt({ to: (e.target as HTMLInputElement).value || undefined })} /></Field>
               </div>
-              <label class="row small"><input type="checkbox" checked={showCash} onChange={(e) => setShowCash((e.target as HTMLInputElement).checked)} />แสดงจุดเงินสด (ATM/สาขา)</label>
-              <label class="row small"><input type="checkbox" checked={showManual} onChange={(e) => setShowManual((e.target as HTMLInputElement).checked)} />แสดงข้อมูลที่เพิ่มเอง</label>
+              <label class="row small"><input type="checkbox" checked={showCash} onChange={(e) => setOpt({ showCash: (e.target as HTMLInputElement).checked })} />แสดงจุดเงินสด (ATM/สาขา)</label>
+              <label class="row small"><input type="checkbox" checked={showManual} onChange={(e) => setOpt({ showManual: (e.target as HTMLInputElement).checked })} />แสดงข้อมูลที่เพิ่มเอง</label>
               <div class="row wrap">
                 <button class="btn sm" onClick={fit}><Icon name="fit" size={15} />พอดีจอ</button>
-                <button class="btn sm" onClick={relayout}><Icon name="refresh" size={15} />จัดเรียงใหม่</button>
+                <button class="btn sm" onClick={relayout} title="จัดตามรูปแบบที่เลือก และล้างตำแหน่งที่ลากเอง"><Icon name="refresh" size={15} />จัดเรียงใหม่</button>
                 <button class="btn sm" onClick={exportPng}><Icon name="image" size={15} />PNG</button>
               </div>
               <div class="row wrap">
@@ -223,6 +279,11 @@ export function NetworkPage() {
                 <button class="btn sm" onClick={() => setModal('link')} disabled={!built}><Icon name="link" size={15} />เพิ่มความสัมพันธ์</button>
               </div>
               {scope === 'all' && res.pairs.length > 1500 && allMin > 0 && <div class="tiny" style="color:var(--warning)">เครือข่ายใหญ่ ({fmtInt(res.pairs.length)} คู่บัญชี) — แสดงเฉพาะคู่ที่ยอดตั้งแต่ {fmtInt(allMin)} บาทเพื่อความเร็ว ปรับได้ด้านบน</div>}
+              <div class="tiny net-pos-status" data-manual={manualActive ? '1' : '0'}>
+                {focus ? 'มุมมองชั่วคราวจาก “ดูในเครือข่าย” — ไม่บันทึกตำแหน่ง'
+                  : manualActive ? <><Icon name="pin" size={13} /> ใช้ตำแหน่งที่จัดเอง (บันทึกในคดี ใช้ในรายงานด้วย) · กด “จัดเรียงใหม่” เพื่อจัดอัตโนมัติ</>
+                  : 'ลากจุดเพื่อจัดตำแหน่งเอง ระบบจำไว้ในคดีและใช้ในรายงาน'}
+              </div>
               {built && <div class="small secondary">{built.summary}</div>}
               <div class="tiny muted">{built ? `${fmtInt(built.nodeCount)} จุด · ${fmtInt(built.edgeCount)} เส้น` : ''} · แตะจุดเพื่อดูรายละเอียด แตะเส้นเพื่อดูธุรกรรม · แตะจุดเส้นประเพื่อดูธุรกรรมของคู่บัญชีที่รวมไว้ · ชี้ที่จุดเพื่ออ่านชื่อเต็ม · ขนาดจุดตามยอดเงินรวม ความหนาเส้นตามยอดโอน</div>
             </div>

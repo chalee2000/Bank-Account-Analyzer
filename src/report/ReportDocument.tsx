@@ -39,7 +39,10 @@ export interface ReportData {
   d: Derived;
   res: AnalysisResult;
   opts: ReportOptions;
-  net: { dataUrl: string; nodeCount: number; edgeCount: number; legend: { label: string; color: string }[]; summary?: string } | null;
+  net: {
+    dataUrl: string; nodeCount: number; edgeCount: number; legend: { label: string; color: string }[]; summary?: string;
+    layout?: 'auto' | 'concentric'; manualPositions?: boolean;
+  } | null;
   traces: { label: string; direction: 'forward' | 'backward'; result: TraceResult }[];
   generatedAt: number;
 }
@@ -240,6 +243,8 @@ export function ReportDocument({ data }: { data: ReportData }) {
             <figure class="rpt-fig">
               <img src={data.net.dataUrl} alt="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี" style="width:100%;border:1px solid #ddd" />
               <figcaption>รูปที่ 3 ผังเครือข่าย {fmtInt(data.net.nodeCount)} จุด {fmtInt(data.net.edgeCount)} เส้น{data.net.summary ? ` (${data.net.summary})` : ''} — ขนาดจุดตามยอดเงินรวม ความหนาเส้นตามยอดโอน วงกลมใหญ่ที่มีวงขาว = เจ้าของ Statement วงกลมเส้นประ = คู่บัญชีอื่นที่รวมไว้ สี่เหลี่ยมเส้นประ = จุดเงินสด เส้นสีเขียว = เงินเข้าเจ้าของ เส้นสีส้ม = เงินออกจากเจ้าของ
+                {data.net.layout === 'concentric' && ' · รูปแบบวงซ้อน: เจ้าของ Statement อยู่วงใน บัญชีร่วมวงถัดมา คู่บัญชีอื่นวงนอก'}
+                {data.net.manualPositions && ' · จัดตำแหน่งตามที่ผู้สืบสวนจัดไว้บนหน้าเครือข่าย'}
                 {data.net.legend.length > 0 && <> · สี: {data.net.legend.map((l) => <span key={l.label} class="rpt-sw"><i style={{ background: l.color }} />{l.label}</span>)}</>}</figcaption>
             </figure>
           ) : <p class="rpt-note">ไม่มีข้อมูลเครือข่ายสำหรับแสดง</p>}

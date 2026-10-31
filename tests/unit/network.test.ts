@@ -5,8 +5,10 @@ import { buildDemoCase } from '../../src/demo';
 import { deriveCase } from '../../src/store/model';
 import { analyze } from '../../src/analysis';
 import {
-  buildElements, computeFit, fitInView, graphSignature, ownerLabelScale, ownerRing, ownerRingRadius, PRINT_PALETTE, updateElementsInPlace, type NetOptions,
+  autoMinAmount, buildElements, computeFit, concentricPositions, fitInView, graphSignature, hashSignature, netOptionsFromView,
+  ownerLabelScale, ownerRing, ownerRingRadius, planLayout, PRINT_PALETTE, snapshotPositions, updateElementsInPlace, type NetOptions,
 } from '../../src/ui/network/graph';
+import type { ElementDefinition } from 'cytoscape';
 
 const state = buildDemoCase();
 const derived = deriveCase(state);
@@ -243,5 +245,155 @@ describe('ผังเครือข่าย: ชื่อและรูป�
     expect(n.data('label')).toBe(plain.data.label);
     expect(cy.nodes('[photo]').length).toBe(0);
     cy.destroy();
+  });
+});
+
+describe('ผังเครือข่าย: รูปแบบวงซ้อน', () => {
+  /** ตำแหน่งวงซ้อน → ระยะ/มุมจากศูนย์กลางของแต่ละจุด */
+  const concentricDistances = (elements: ElementDefinition[]) => {
+    const ns = elements.filter((e) => !('source' in e.data)).map((e) => e.data as { id: string; role: string; anchor?: number; size?: number; ring?: number });
+    const pos = concentricPositions(ns);
+    const dist = new Map(ns.map((n) => [n.id, Math.hypot(pos[n.id]!.x, pos[n.id]!.y)]));
+    const angle = new Map(ns.map((n) => [n.id, Math.atan2(pos[n.id]!.y, pos[n.id]!.x)]));
+    const roles = new Map(ns.map((n) => [n.id, n.role]));
+    return { dist, angle, roles, pos, ns };
+  };
+
+  it('anchor ของคู่บัญชีชี้เจ้าของที่เชื่อมด้วยยอดสูงสุด และของเจ้าของคือลำดับบนวงของตัวเอง', () => {
+    const g = build();
+    const ring = new Map(nodes(g).filter((n) => n.data.role === 'owner').map((n) => [n.data.id as string, n.data.ring as number]));
+    for (const [id, r] of ring) expect(nodes(g).find((n) => n.data.id === id)!.data.anchor).toBe(r);
+    for (const n of nodes(g).filter((x) => x.data.role === 'plain' || x.data.role === 'shared')) {
+      const id = n.data.id as string;
+      const tot = new Map<string, number>();
+      for (const p of result.pairs) {
+        if (p.from === id && ring.has(p.to)) tot.set(p.to, (tot.get(p.to) ?? 0) + p.total);
+        if (p.to === id && ring.has(p.from)) tot.set(p.from, (tot.get(p.from) ?? 0) + p.total);
+      }
+      const best = [...tot.entries()].sort((a, b) => b[1] - a[1])[0]![0];
+      expect(n.data.anchor).toBe(ring.get(best));
+    }
+  });
+
+  it('เจ้าของ Statement อยู่วงใน บัญชีร่วมวงถัดมา คู่บัญชีวงนอก และจุดสรุปเส้นประอยู่วงนอกสุด', () => {
+    const { dist, roles } = concentricDistances(build({ topPerOwner: 2 }).elements);
+    const of = (role: string) => [...dist.entries()].filter(([id]) => roles.get(id) === role).map(([, v]) => v);
+    const owner = of('owner');
+    const shared = of('shared');
+    const plain = of('plain');
+    const agg = of('agg');
+    expect(owner.length).toBeGreaterThan(1);
+    expect(shared.length).toBeGreaterThan(0);
+    expect(agg.length).toBeGreaterThan(0);
+    expect(Math.max(...owner)).toBeLessThan(Math.min(...shared));
+    expect(Math.max(...shared)).toBeLessThan(Math.min(...plain));
+    expect(Math.max(...plain)).toBeLessThan(Math.min(...agg));
+  });
+
+  it('คู่บัญชีของเจ้าของแต่ละรายแผ่ออกไปด้านเดียวกับเจ้าของ (มุมใกล้มุมของเจ้าของ) และไม่มีจุดซ้อนกัน', () => {
+    const g = build({ topPerOwner: 25 });
+    const { angle, roles, pos, ns } = concentricDistances(g.elements);
+    const ownerAt = new Map(ns.filter((n) => n.role === 'owner').map((n) => [n.anchor!, angle.get(n.id)!]));
+    const diffs = ns.filter((n) => roles.get(n.id) === 'plain' && ownerAt.has(n.anchor!))
+      .map((n) => Math.abs(Math.atan2(Math.sin(angle.get(n.id)! - ownerAt.get(n.anchor!)!), Math.cos(angle.get(n.id)! - ownerAt.get(n.anchor!)!))));
+    expect(diffs.length).toBeGreaterThan(5);
+    expect(diffs.reduce((a, b) => a + b, 0) / diffs.length).toBeLessThan(Math.PI / 4);
+    // ไม่มีสองจุดอยู่ใกล้กันจนซ้อน
+    const pts = Object.values(pos);
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+      expect(Math.hypot(pts[i]!.x - pts[j]!.x, pts[i]!.y - pts[j]!.y)).toBeGreaterThan(20);
+    }
+  });
+
+  it('จุดเยอะเกินวงเดียวสลับวงย่อย ระยะห่างไม่ต่ำกว่าขั้นต่ำ', () => {
+    const els: ElementDefinition[] = [
+      { data: { id: 'o', role: 'owner', size: 50, anchor: 0, ring: 0 } },
+      ...Array.from({ length: 300 }, (_, i) => ({ data: { id: 'p' + i, role: 'plain', size: 20, anchor: 0 } })),
+    ];
+    const { pos } = concentricDistances(els);
+    const pts = Object.entries(pos).filter(([id]) => id !== 'o').map(([, p]) => p);
+    let minD = Infinity;
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) minD = Math.min(minD, Math.hypot(pts[i]!.x - pts[j]!.x, pts[i]!.y - pts[j]!.y));
+    expect(minD).toBeGreaterThan(30);
+  });
+
+  it('เจ้าของรายเดียวอยู่กลางพอดี คู่บัญชีล้อมรอบ', () => {
+    const els: ElementDefinition[] = [
+      { data: { id: 'o', role: 'owner', size: 50, anchor: 0 } },
+      ...['a', 'b', 'c'].map((id) => ({ data: { id, role: 'plain', size: 20, anchor: 0 } })),
+      { data: { id: 'agg', role: 'agg', size: 20, anchor: 0 } },
+      { data: { id: 'e1', source: 'a', target: 'o' } }, { data: { id: 'e2', source: 'o', target: 'b' } }, { data: { id: 'e3', source: 'o', target: 'c' } },
+      { data: { id: 'e4', source: 'agg', target: 'o' } },
+    ];
+    const { dist } = concentricDistances(els);
+    expect(dist.get('o')).toBeLessThan(1e-6);
+    for (const id of ['a', 'b', 'c', 'agg']) expect(dist.get(id)).toBeGreaterThan(20);
+  });
+});
+
+describe('ผังเครือข่าย: จำตำแหน่งที่จัดไว้', () => {
+  const g = build();
+  const ids = nodes(g).map((n) => n.data.id as string);
+  const all = Object.fromEntries(ids.map((id, i) => [id, { x: i * 10, y: -i * 5 }]));
+
+  it('ผังเหมือนตอนบันทึก → ใช้ตำแหน่งเดิมทั้งหมดไม่ว่ารูปแบบใด', () => {
+    const saved = { sig: hashSignature(g.elements), nodes: all, manual: true };
+    expect(planLayout('auto', g.elements, saved)).toEqual({ kind: 'preset', positions: all });
+    expect(planLayout('concentric', g.elements, saved).kind).toBe('preset');
+  });
+
+  it('ไม่มีตำแหน่ง → อัตโนมัติวางเจ้าของบนวงรีตายตัว / วงซ้อนจัดใหม่', () => {
+    const p = planLayout('auto', g.elements);
+    expect(p).toEqual({ kind: 'fcose', fixed: ownerRing(g.elements), reused: false });
+    expect(planLayout('concentric', g.elements).kind).toBe('concentric');
+  });
+
+  it('ผังเปลี่ยน (เช่น เปิดจุดเงินสดเพิ่ม): โหมดอัตโนมัติล็อกจุดที่เคยวางไว้แล้วจัดเฉพาะจุดใหม่ / วงซ้อนจัดใหม่ทั้งผัง', () => {
+    const saved = { sig: hashSignature(g.elements), nodes: all };
+    const g2 = build({ showCash: true });
+    expect(hashSignature(g2.elements)).not.toBe(saved.sig);
+    const p = planLayout('auto', g2.elements, saved);
+    expect(p.kind).toBe('fcose');
+    if (p.kind !== 'fcose') return;
+    expect(p.reused).toBe(true);
+    const present = new Set(nodes(g2).map((n) => n.data.id as string));
+    expect(p.fixed.map((f) => f.nodeId).sort()).toEqual(ids.filter((id) => present.has(id)).sort());
+    expect(p.fixed.every((f) => f.position === all[f.nodeId])).toBe(true);
+    expect(planLayout('concentric', g2.elements, saved).kind).toBe('concentric');
+  });
+
+  it('ตำแหน่งไม่ครบทุกจุด แม้ sig ตรง → ไม่ใช้แบบ preset', () => {
+    const partial = { ...all };
+    delete partial[ids[0]!];
+    expect(planLayout('auto', g.elements, { sig: hashSignature(g.elements), nodes: partial }).kind).toBe('fcose');
+  });
+
+  it('hashSignature คงที่เมื่อเปลี่ยนแค่สี และต่างเมื่อชุดจุด/เส้นเปลี่ยน', () => {
+    expect(hashSignature(build({ colorBy: 'community' }).elements)).toBe(hashSignature(g.elements));
+    expect(hashSignature(build({ topPerOwner: 2 }).elements)).not.toBe(hashSignature(g.elements));
+  });
+
+  it('snapshotPositions เก็บทุกจุด ปัดทศนิยม 1 ตำแหน่ง และระบุว่าจัดเองหรือไม่', () => {
+    const cy = cytoscape({ headless: true, styleEnabled: false, elements: structuredClone(g.elements) });
+    cy.nodes().forEach((n, i) => { n.position({ x: i + 0.123, y: -i - 0.987 }); });
+    const snap = snapshotPositions(cy, 'abc', true)!;
+    expect(snap.sig).toBe('abc');
+    expect(snap.manual).toBe(true);
+    expect(Object.keys(snap.nodes).sort()).toEqual([...ids].sort());
+    expect(snap.nodes[ids[1]!]).toEqual({ x: 1.1, y: -2 });
+    expect(snapshotPositions(cy, 'abc', false)!.manual).toBeUndefined();
+    cy.destroy();
+  });
+
+  it('ตัวกรองที่บันทึกแปลงเป็นตัวเลือกผังแบบเดียวกันทุกที่ (หน้าเครือข่าย/รายงาน) และคำบรรยายบอกช่วงวันที่', () => {
+    const o = netOptionsFromView({ scope: 'core', topPerOwner: 12, colorBy: 'role', showCash: true, showManual: true, from: '2024-03-02', to: '2024-03-05' }, result);
+    expect(o.from).toBe(Date.UTC(2024, 2, 2));
+    expect(o.to).toBe(Date.UTC(2024, 2, 5, 23, 59, 59));
+    expect(o.minAmount).toBe(0);
+    expect(netOptionsFromView({ scope: 'all', topPerOwner: 12, colorBy: 'role', showCash: true, showManual: true }, result).minAmount).toBe(autoMinAmount(result));
+    expect(netOptionsFromView({ scope: 'all', topPerOwner: 12, colorBy: 'role', showCash: true, showManual: true, allMin: 5000 }, result).minAmount).toBe(5000);
+    const sum = buildElements(derived, result, state, { ...o, showManual: false }, PRINT_PALETTE).summary;
+    expect(sum).toContain('ช่วงวันที่');
+    expect(build().summary).not.toContain('ช่วงวันที่');
   });
 });

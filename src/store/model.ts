@@ -39,7 +39,43 @@ export interface CaseState {
   pinnedTraces: PinnedTrace[];
   /** ชื่อ/หมายเหตุ/รูปบุคคลที่ผู้สืบสวนกำหนดต่อบัญชี */
   accountNotes: Record<string, AccountNote>;
+  /** มุมมองผังเครือข่ายที่ผู้สืบสวนจัดไว้ (ตัวกรอง รูปแบบ ตำแหน่งที่ลากเอง) — รายงานใช้มุมมองเดียวกัน */
+  networkView?: NetworkView;
 }
+
+export type LayoutMode = 'auto' | 'concentric';
+
+export interface NetworkViewOptions {
+  scope: 'core' | 'all';
+  topPerOwner: number;
+  colorBy: 'role' | 'bank' | 'community';
+  /** ยอดขั้นต่ำของมุมมอง "ทุกบัญชี" (ไม่มี = คำนวณอัตโนมัติจากขนาดเครือข่าย) */
+  allMin?: number;
+  showCash: boolean;
+  showManual: boolean;
+  /** ช่วงวันที่ (YYYY-MM-DD) */
+  from?: string;
+  to?: string;
+}
+
+export interface SavedPositions {
+  /** แฮชของโครงสร้างผัง (จุด + เส้น) ตอนบันทึก — ใช้ตำแหน่งเฉพาะเมื่อผังเหมือนเดิม */
+  sig: string;
+  nodes: Record<string, { x: number; y: number }>;
+  /** ผู้สืบสวนลากจุดจัดเองแล้ว (ไม่ใช่ผลจัดอัตโนมัติล้วน) */
+  manual?: boolean;
+}
+
+export interface NetworkView {
+  layout: LayoutMode;
+  options: NetworkViewOptions;
+  /** ตำแหน่งที่ลากเอง แยกตามรูปแบบการจัดผัง */
+  positions?: Partial<Record<LayoutMode, SavedPositions>>;
+}
+
+export const DEFAULT_NETWORK_OPTIONS: NetworkViewOptions = {
+  scope: 'core', topPerOwner: 12, colorBy: 'role', showCash: true, showManual: true,
+};
 
 export interface AccountNote {
   label?: string;

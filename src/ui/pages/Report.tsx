@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { analysis, cs, derived, engineTrace, notify } from '../../state';
 import { DEFAULT_REPORT_OPTIONS, ReportDocument, type ReportData, type ReportOptions } from '../../report/ReportDocument';
-import { renderNetworkImage } from '../network/graph';
+import { netOptionsFromView, renderNetworkImage } from '../network/graph';
+import { DEFAULT_NETWORK_OPTIONS } from '../../store/model';
 import { buildWorkbook } from '../../report/exportXlsx';
 import { Empty, Notice, saveBlob } from '../common';
 import { Icon } from '../icons';
@@ -50,12 +51,15 @@ export function ReportPage() {
     if (!res || !d || !opts.network) { setNet(null); return; }
     let cancelled = false;
     setNetBusy(true);
-    renderNetworkImage(d, res, st, { scope: 'core', topPerOwner: 12, colorBy: 'role', showCash: true, showManual: true, showPhotos: opts.networkPhotos })
+    // ใช้มุมมองที่จัดไว้บนหน้าเครือข่าย (ตัวกรอง รูปแบบ ตำแหน่ง) — คดีที่ไม่เคยจัดใช้ค่าเริ่มต้นเดียวกับหน้าเครือข่าย
+    const view = st.networkView;
+    const mode = view?.layout ?? 'auto';
+    renderNetworkImage(d, res, st, { ...netOptionsFromView(view?.options ?? DEFAULT_NETWORK_OPTIONS, res), showPhotos: opts.networkPhotos }, undefined, { mode, saved: view?.positions?.[mode] })
       .then((r) => { if (!cancelled) setNet(r); })
       .catch((e) => { console.error(e); if (!cancelled) setNet(null); })
       .finally(() => !cancelled && setNetBusy(false));
     return () => { cancelled = true; };
-  }, [res, d, st.manualNodes, st.manualLinks, st.accountNotes, opts.network, opts.networkPhotos]);
+  }, [res, d, st.manualNodes, st.manualLinks, st.accountNotes, st.networkView, opts.network, opts.networkPhotos]);
 
   // เส้นทางที่ปักหมุด
   useEffect(() => {
