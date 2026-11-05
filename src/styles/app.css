@@ -440,3 +440,19 @@ table.tbl { border-collapse: separate; border-spacing: 0; width: 100%; font-size
   .nav, .topbar, .tabbar, .inspector, .toast-host, .no-print { display: none !important; }
   .shell { display: block; } .page { overflow: visible; padding: 0; }
 }
+
+/* ผังเต็มจอ (ดับเบิลคลิกพื้นที่ว่างของผัง): ซ่อนเมนูซ้าย แถบหัว และแถบเมนูมือถือ — แผงรายละเอียดบัญชียังเปิดข้างผังได้ */
+html.net-max .nav, html.net-max .topbar, html.net-max .tabbar { display: none !important; }
+html.net-max .shell { grid-template-columns: minmax(0, 1fr); }
+/* แผงรายละเอียดเป็นคอลัมน์ข้างผังเฉพาะจอกว้าง (จอแคบกว่านี้แผงลอยทับอยู่แล้ว) */
+@media (min-width: 1101px) { html.net-max .shell.has-inspector { grid-template-columns: minmax(0, 1fr) 340px; } }
+@media (min-width: 1281px) { html.net-max .shell.has-inspector { grid-template-columns: minmax(0, 1fr) 380px; } }
+@media (max-width: 720px) { html.net-max .page.flush { padding-bottom: var(--safe-b); } }
+.net-full-exit {
+  position: absolute; top: 12px; right: 12px; z-index: 6; display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-1);
+  font: inherit; font-size: 12.5px; box-shadow: var(--shadow-1); cursor: pointer;
+}
+.net-full-exit:hover { border-color: var(--accent); color: var(--accent); }
+.net-full-exit .kbd { color: var(--text-3); font-size: 11px; }
+@media (pointer: coarse) { .net-full-exit .kbd { display: none; } }

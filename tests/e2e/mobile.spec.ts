@@ -94,5 +94,25 @@ test('iPhone: กดค้างที่พื้นที่ว่าง/จ�
   await expect(page.locator('.ctx-menu')).toBeVisible();
   await expect(page.locator('.ctx-menu').getByRole('menuitem', { name: /ชื่อ-นามสกุล/ })).toBeVisible();
   await expect(page.locator('.inspector')).toBeHidden();
+  await page.keyboard.press('Escape');
+
+  // แตะสองครั้งที่พื้นที่ว่าง → ผังเต็มจอ (แถบเมนูล่างหาย) → แตะสองครั้งอีกครั้ง → กลับ
+  await page.mouse.click(5, 5); // ปิดเมนูที่ค้างอยู่
+  const doubleTap = async (p: { x: number; y: number }) => {
+    for (let i = 0; i < 2; i++) {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [p] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await page.waitForTimeout(90);
+    }
+    await page.waitForTimeout(400);
+  };
+  await expect(page.locator('.ctx-menu')).toBeHidden();
+  await doubleTap(blank!);
+  await expect(page.locator('html')).toHaveClass(/net-max/);
+  await expect(page.locator('.tabbar')).toBeHidden();
+  await page.screenshot({ path: resolve(__dirname, 'screenshots', 'iphone-14-network-fullscreen.png') });
+  await doubleTap(blank!);
+  await expect(page.locator('html')).not.toHaveClass(/net-max/);
+  await expect(page.locator('.tabbar')).toBeVisible();
   expect(errors).toEqual([]);
 });

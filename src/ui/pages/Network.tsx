@@ -55,6 +55,20 @@ export function NetworkPage() {
   const [personId, setPersonId] = useState<string | null>(null);
   /** โหมดมือ (ลากพื้นที่ว่าง = เลื่อนผัง) / โหมดเลือก (ลากพื้นที่ว่าง = กรอบเลือกหลายจุด) */
   const [handMode, setHandMode] = useState(true);
+  /** เต็มจอ: ซ่อนเมนูซ้าย/แถบหัว ให้ผังกินทั้งหน้าต่าง และขอเต็มจอของเบราว์เซอร์ (ถ้ารองรับ) */
+  const [full, setFull] = useState(false);
+  const fullRef = useRef(false);
+  fullRef.current = full;
+  const toggleFull = (on = !fullRef.current) => {
+    setFull(on);
+    const de = document.documentElement;
+    if (on) { if (!document.fullscreenElement && de.requestFullscreen) de.requestFullscreen().catch(() => undefined); }
+    else if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
+  };
+  const toggleFullRef = useRef(toggleFull);
+  toggleFullRef.current = toggleFull;
+  /** autoFit ประกาศหลังจุด return ก่อนกำหนด (ยังไม่มีข้อมูล) — effect ที่ผูกครั้งเดียวต้องเรียกผ่าน ref ไม่เช่นนั้นจะได้ตัวแปรที่ยังไม่ถูกกำหนดค่า */
+  const autoFitRef = useRef<(cy: Core) => void>(() => undefined);
   const closeMenus = () => { setMenu(null); setCanvasMenu(null); setNoteMenu(null); };
   const sigRef = useRef('');
   const focus = params.get('focus');
@@ -169,6 +183,8 @@ export function NetworkPage() {
       cy.on('cxttap taphold', (ev) => { if (ev.target === cy) openCanvas(ev); });
       cy.on('cxttap taphold', 'edge', (ev) => openCanvas(ev, ev.target.id() as string));
       cy.on('cxttap taphold', 'node.note', openNote);
+      // ดับเบิลคลิก (หรือแตะสองครั้ง) ที่พื้นที่ว่าง → ขยายเต็มจอ / กลับ
+      cy.on('dbltap', (ev) => { if (ev.target === cy) toggleFullRef.current(); });
       cy.on('dbltap', 'node.note', (ev) => {
         const nt = notesNow().find((x) => 'note:' + x.id === ev.target.id());
         if (nt) setNoteEdit({ id: nt.id, text: nt.text });
@@ -252,7 +268,7 @@ export function NetworkPage() {
           return;
         }
       }
-      autoFit(cy);
+      autoFitRef.current(cy);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [built, ready, focus, layoutMode]);
@@ -281,10 +297,40 @@ export function NetworkPage() {
       if (!cy) return;
       if ((e.ctrlKey || e.metaKey) && e.code === 'KeyA') { e.preventDefault(); cy.nodes().select(); }
       else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.code === 'KeyH') setHandMode((h) => !h);
-      else if (e.key === 'Escape') cy.elements().unselect();
+      else if (e.key === 'Escape') {
+        cy.elements().unselect();
+        // Esc ออกจากเต็มจอ (ถ้าไม่ได้กำลังปิดเมนูคลิกขวา) — เต็มจอของเบราว์เซอร์ออกเองและแจ้งผ่าน fullscreenchange
+        if (fullRef.current && !document.querySelector('.ctx-menu')) toggleFullRef.current(false);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // เข้า/ออกเต็มจอ: สลับคลาสที่ <html> (CSS ซ่อนเมนูซ้าย/แถบหัว) แล้วปรับขนาดผังและจัดให้พอดี — ไม่จัดวางใหม่
+  useEffect(() => {
+    document.documentElement.classList.toggle('net-max', full);
+    const cy = cyRef.current;
+    if (!cy || !ready) return;
+    const id = requestAnimationFrame(() => { cy.resize(); autoFitRef.current(cy); });
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [full]);
+  useEffect(() => {
+    // ออกจากเต็มจอของเบราว์เซอร์ด้วย Esc/ปุ่มของเบราว์เซอร์ → ออกจากโหมดเต็มจอของผังด้วย; หน้าต่างเปลี่ยนขนาด → จัดให้พอดีใหม่
+    const onFs = () => {
+      if (!document.fullscreenElement && fullRef.current) { setFull(false); return; }
+      const cy = cyRef.current;
+      if (cy) requestAnimationFrame(() => { cy.resize(); autoFitRef.current(cy); });
+    };
+    document.addEventListener('fullscreenchange', onFs);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFs);
+      // ออกจากหน้าเครือข่าย (ไปหน้าอื่น) → กลับสู่หน้าปกติเสมอ
+      document.documentElement.classList.remove('net-max');
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // เปิด/ปิดแผงเครื่องมือแล้วจัดผังให้พอดีพื้นที่ใหม่
@@ -292,7 +338,7 @@ export function NetworkPage() {
   useEffect(() => {
     if (firstPanel.current) { firstPanel.current = false; return; }
     const cy = cyRef.current;
-    if (cy && ready) autoFit(cy);
+    if (cy && ready) autoFitRef.current(cy);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelOpen]);
 
@@ -323,6 +369,7 @@ export function NetworkPage() {
   const fit = () => { if (cyRef.current) fitInView(cyRef.current, viewInsets()); };
   /** จัดให้พอดีหลังจัดวาง/เปิด-ปิดแผง: ผังไหลเงินไม่ย่อจนอ่านตัวเลขไม่ได้ */
   const autoFit = (cy: Core) => (live.current.mode === 'flow' ? fitFlowView(cy, viewInsets()) : fitInView(cy, viewInsets()));
+  autoFitRef.current = autoFit;
   const exportPng = async () => {
     const cy = cyRef.current;
     if (!cy) return;
@@ -339,7 +386,7 @@ export function NetworkPage() {
         {menu && <NodeMenuPopup menu={menu} onClose={() => setMenu(null)} onEdit={(id) => { setMenu(null); setPersonId(id); }} />}
         {canvasMenu && (
           <CanvasMenu
-            menu={canvasMenu} cy={cyRef.current} opt={opt} handMode={handMode} layoutMode={layoutMode} onClose={() => setCanvasMenu(null)}
+            menu={canvasMenu} cy={cyRef.current} opt={opt} handMode={handMode} layoutMode={layoutMode} full={full} onClose={() => setCanvasMenu(null)}
             actions={{
               addNote: () => setNoteEdit({ text: '', model: canvasMenu.model }),
               toggleLabels: (m) => setOpt({ edgeLabels: opt.edgeLabels === m ? 'off' : m }),
@@ -350,6 +397,7 @@ export function NetworkPage() {
               relayout,
               fit,
               toggleBadges: () => setOpt({ bankBadges: !opt.bankBadges }),
+              toggleFull: () => toggleFull(),
             }}
           />
         )}
@@ -362,6 +410,11 @@ export function NetworkPage() {
         )}
         {!handMode && (
           <div class="net-mode" role="status">โหมดเลือก: ลากกรอบเพื่อเลือกหลายจุด แล้วลากจุดใดก็ได้เพื่อย้ายพร้อมกัน<button onClick={() => setHandMode(true)}>กลับโหมดมือ (H)</button></div>
+        )}
+        {full && (
+          <button class="net-full-exit" onClick={() => toggleFull(false)} title="ดับเบิลคลิกพื้นที่ว่าง หรือกด Esc ก็ได้">
+            <Icon name="shrink" size={15} />ออกจากเต็มจอ<span class="kbd">ดับเบิลคลิก / Esc</span>
+          </button>
         )}
         <div class="net-tools" ref={toolsRef}>
           <button class="btn sm" onClick={() => setPanelOpen(!panelOpen)}><Icon name="filter" size={15} />{panelOpen ? 'ซ่อนตัวกรอง' : 'ตัวกรอง / เครื่องมือ'}</button>
@@ -412,7 +465,7 @@ export function NetworkPage() {
                   : 'ลากจุดเพื่อจัดตำแหน่งเอง ระบบจำไว้ในคดีและใช้ในรายงาน'}
               </div>
               {built && <div class="small secondary">{built.summary}</div>}
-              <div class="tiny muted">{built ? `${fmtInt(built.nodeCount)} จุด · ${fmtInt(built.edgeCount)} เส้น` : ''} · คลิกขวา (หรือกดค้าง) ที่จุด เส้น หรือพื้นที่ว่างเพื่อดูคำสั่งเพิ่มเติม · แตะจุดเพื่อดูรายละเอียด แตะเส้นเพื่อดูธุรกรรม · แตะจุดเส้นประเพื่อดูธุรกรรมของคู่บัญชีที่รวมไว้ · ชี้ที่จุดเพื่ออ่านชื่อเต็ม · ขนาดจุดตามยอดเงินรวม ความหนาเส้นตามยอดโอน</div>
+              <div class="tiny muted">{built ? `${fmtInt(built.nodeCount)} จุด · ${fmtInt(built.edgeCount)} เส้น` : ''} · คลิกขวา (หรือกดค้าง) ที่จุด เส้น หรือพื้นที่ว่างเพื่อดูคำสั่งเพิ่มเติม · ดับเบิลคลิกพื้นที่ว่างเพื่อขยาย/ย่อเต็มจอ · แตะจุดเพื่อดูรายละเอียด แตะเส้นเพื่อดูธุรกรรม · แตะจุดเส้นประเพื่อดูธุรกรรมของคู่บัญชีที่รวมไว้ · ชี้ที่จุดเพื่ออ่านชื่อเต็ม · ขนาดจุดตามยอดเงินรวม ความหนาเส้นตามยอดโอน</div>
             </div>
           )}
         </div>
@@ -511,13 +564,14 @@ interface CanvasActions {
   relayout: () => void;
   fit: () => void;
   toggleBadges: () => void;
+  toggleFull: () => void;
 }
 
 const Check = ({ on }: { on: boolean }) => <span class="ctx-check" aria-hidden="true">{on ? <Icon name="check" size={15} /> : null}</span>;
 
 /** เมนูคลิกขวาที่พื้นที่ว่าง หรือบนเส้น (มีคำสั่งของเส้นนั้นด้านบน) */
-function CanvasMenu({ menu, cy, opt, handMode, layoutMode, onClose, actions }: {
-  menu: CanvasMenuState; cy: Core | null; opt: NetworkViewOptions; handMode: boolean; layoutMode: LayoutMode; onClose: () => void; actions: CanvasActions;
+function CanvasMenu({ menu, cy, opt, handMode, layoutMode, full, onClose, actions }: {
+  menu: CanvasMenuState; cy: Core | null; opt: NetworkViewOptions; handMode: boolean; layoutMode: LayoutMode; full: boolean; onClose: () => void; actions: CanvasActions;
 }) {
   const [layoutOpen, setLayoutOpen] = useState(false);
   const act = (fn: () => void) => () => { onClose(); fn(); };
@@ -565,6 +619,7 @@ function CanvasMenu({ menu, cy, opt, handMode, layoutMode, onClose, actions }: {
         </>
       )}
       <button role="menuitem" onClick={act(actions.fit)}><Icon name="fit" size={16} />พอดีจอ</button>
+      <button role="menuitem" onClick={act(actions.toggleFull)}><Icon name={full ? 'shrink' : 'expand'} size={16} />{full ? 'ออกจากเต็มจอ' : 'ขยายเต็มจอ'}<span class="ctx-key">ดับเบิลคลิก</span></button>
       <div class="ctx-sep" />
       <button role="menuitemcheckbox" aria-checked={!!opt.bankBadges} onClick={act(actions.toggleBadges)}><Check on={!!opt.bankBadges} />แสดงไอคอนธนาคารทุกโหนด</button>
     </FloatingMenu>

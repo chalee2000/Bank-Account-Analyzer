@@ -260,3 +260,86 @@ test('คลิกขวาที่พื้นที่ว่าง/เส้�
 
   expect(errors.filter((x) => !/favicon|manifest/i.test(x))).toEqual([]);
 });
+
+test('ดับเบิลคลิกพื้นที่ว่าง → ผังเต็มจอ; ดับเบิลคลิกอีกครั้ง/ปุ่ม/Esc → กลับ โดยตำแหน่งจุดไม่เปลี่ยน', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'ทดลองด้วยข้อมูลสมมติ' }).click();
+  await expect(page.getByText('ภาพรวมคดี')).toBeVisible();
+  await page.goto('/#/network');
+  await waitGraph(page);
+  const html = page.locator('html');
+  const exitBtn = page.getByRole('button', { name: /ออกจากเต็มจอ/ });
+  const box = () => page.locator(HOST).boundingBox();
+  const normal = (await box())!;
+  const pos0 = await graphPositions(page);
+  const enterByDblClick = async () => {
+    const s = await blankSpot(page);
+    expect(s, 'ต้องมีพื้นที่ว่างบนผัง').not.toBeNull();
+    await page.mouse.dblclick(s!.x, s!.y);
+  };
+
+  // เข้าเต็มจอด้วยดับเบิลคลิก: เมนูซ้าย/แถบหัวหาย ผังกินทั้งหน้าต่าง ตำแหน่งจุดเดิม
+  await enterByDblClick();
+  await expect(html).toHaveClass(/net-max/);
+  await expect(page.locator('.nav')).toBeHidden();
+  await expect(page.locator('.topbar')).toBeHidden();
+  await expect(exitBtn).toBeVisible();
+  await expect.poll(async () => (await box())!.width).toBeGreaterThan(1400);
+  expect((await box())!.height).toBeGreaterThan(860);
+  await page.waitForTimeout(300);
+  expectSamePositions(pos0, await graphPositions(page));
+  await page.screenshot({ path: shot('network-fullscreen') });
+
+  // แตะจุดบัญชีขณะเต็มจอ → แผงรายละเอียดยังเปิดได้; ดับเบิลคลิกบนจุดไม่สลับเต็มจอ
+  const node = await page.evaluate((sel) => {
+    const host = document.querySelector(sel) as any;
+    const r = host.getBoundingClientRect();
+    for (const n of host.__cy.nodes('.plain').toArray()) {
+      if (n.data('kind') !== 'account') continue;
+      const p = n.renderedPosition();
+      const x = r.left + p.x;
+      const y = r.top + p.y;
+      const hit = document.elementFromPoint(x, y);
+      if (hit && host.contains(hit)) return { x, y };
+    }
+    return null;
+  }, HOST);
+  expect(node).not.toBeNull();
+  await page.mouse.dblclick(node!.x, node!.y);
+  await expect(page.locator('.inspector')).toBeVisible();
+  await expect(html).toHaveClass(/net-max/);
+  await page.getByRole('button', { name: 'ปิดแผงรายละเอียด' }).click();
+  await expect(page.locator('.inspector')).toBeHidden();
+
+  // ดับเบิลคลิกพื้นที่ว่างอีกครั้ง → กลับหน้าปกติ ขนาดเดิม
+  await enterByDblClick();
+  await expect(html).not.toHaveClass(/net-max/);
+  await expect(page.locator('.nav')).toBeVisible();
+  await expect(exitBtn).toBeHidden();
+  await expect.poll(async () => Math.round((await box())!.width)).toBe(Math.round(normal.width));
+  expectSamePositions(pos0, await graphPositions(page));
+
+  // เมนูคลิกขวา → ขยายเต็มจอ → ออกด้วยปุ่ม; เข้าใหม่ → ออกด้วย Esc
+  for (const exit of ['button', 'esc'] as const) {
+    await openCanvasMenu(page);
+    await canvasMenu(page).getByRole('menuitem', { name: /ขยายเต็มจอ/ }).click();
+    await expect(html).toHaveClass(/net-max/);
+    if (exit === 'button') await exitBtn.click();
+    else await page.keyboard.press('Escape');
+    await expect(html).not.toHaveClass(/net-max/);
+    await expect(page.locator('.nav')).toBeVisible();
+  }
+
+  // ไปหน้าอื่นขณะเต็มจอ → กลับสู่หน้าปกติ
+  await enterByDblClick();
+  await expect(html).toHaveClass(/net-max/);
+  await page.goto('/#/transactions');
+  await expect(html).not.toHaveClass(/net-max/);
+  await expect(page.locator('.nav')).toBeVisible();
+
+  expect(errors.filter((x) => !/favicon|manifest/i.test(x))).toEqual([]);
+});
