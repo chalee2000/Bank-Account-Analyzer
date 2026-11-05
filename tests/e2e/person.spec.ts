@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const shot = (name: string) => resolve(__dirname, 'screenshots', `${test.info().project.name}-${name}.png`);
 const NAME = 'นายทดสอบ ภาพบุคคล';
+/** ข้อมูลสมมติ: เลขบัตรเรียงตัวเลขที่หลักตรวจสอบถูกต้อง และที่อยู่ที่ไม่มีจริง */
+const ID_CARD = '1234567890121';
+const ADDRESS = '99/9 หมู่ 9 ถนนสมมติ ตำบลทดสอบ อำเภอตัวอย่าง จังหวัดสมมติ 10000';
 const HOST = '.net-canvas [role=img]';
 
 type Pos = Record<string, { x: number; y: number }>;
@@ -81,10 +84,25 @@ test('คลิกขวาที่จุดบัญชี → ตั้งช
   const menu = page.locator('.ctx-menu');
   await expect(menu).toBeVisible();
   await page.screenshot({ path: shot('person-menu') });
-  await menu.getByRole('menuitem', { name: /ตั้งชื่อ-นามสกุล \/ ใส่รูปบุคคล/ }).click();
-  const modal = page.getByRole('dialog', { name: 'ชื่อ-นามสกุล และรูปบุคคล' });
+  await menu.getByRole('menuitem', { name: /ใส่ข้อมูลบุคคล \(เลขบัตร ชื่อ-นามสกุล ที่อยู่ รูป\)/ }).click();
+  const modal = page.getByRole('dialog', { name: 'ข้อมูลบุคคล' });
   await expect(modal).toBeVisible();
+  // ลำดับช่อง: เลขบัตรอยู่บนชื่อ, ที่อยู่ใต้ชื่อ, พิกัดใต้ที่อยู่
+  const labels = await modal.locator('label.field > span:first-child').allTextContents();
+  const at = (t: string) => labels.findIndex((l) => l.startsWith(t));
+  expect(at('เลขประจำตัวประชาชน')).toBeLessThan(at('ชื่อ-นามสกุล'));
+  expect(at('ชื่อ-นามสกุล')).toBeLessThan(at('ที่อยู่'));
+  expect(at('ที่อยู่')).toBeLessThan(at('พิกัดที่อยู่'));
+  // เลขบัตร (สมมติ) หลักตรวจสอบผิด → เตือน; แก้ให้ถูก → ยืนยันรูปแบบ
+  const idBox = modal.getByLabel('เลขประจำตัวประชาชน');
+  await idBox.fill('1234567890123');
+  await expect(modal.getByRole('alert')).toContainText('หลักตรวจสอบ');
+  await idBox.fill(ID_CARD);
+  await expect(modal.getByText('รูปแบบถูกต้อง: 1-2345-67890-12-1')).toBeVisible();
   await modal.getByPlaceholder('เช่น นายสมมติ ตัวอย่าง').fill(NAME);
+  await modal.getByLabel('ที่อยู่', { exact: true }).fill(ADDRESS);
+  await modal.getByLabel('พิกัดที่อยู่ (ละติจูด, ลองจิจูด)').fill('https://maps.example/?q=13.7563,100.5018');
+  await expect(modal.getByText('ละติจูด 13.756300 · ลองจิจูด 100.501800')).toBeVisible();
   const png = await page.evaluate(() => {
     const c = document.createElement('canvas');
     c.width = 120;
@@ -117,11 +135,15 @@ test('คลิกขวาที่จุดบัญชี → ตั้งช
   await expect.poll(async () => magentaPixels(page, await networkPng(page)), { timeout: 10_000 }).toBeGreaterThan(100);
   await page.screenshot({ path: shot('person-node') });
 
-  // แผงรายละเอียดบัญชีแสดงรูปและชื่อ
+  // แผงรายละเอียดบัญชีแสดงรูป ชื่อ เลขบัตร (จัดรูปแบบ) ที่อยู่ และพิกัด (ค่ามาตรฐาน)
   await page.mouse.click(target!.x, target!.y);
   const panel = page.locator('.inspector');
   await expect(panel.locator(`img.person-photo[alt="รูปของ ${NAME}"]`).first()).toBeVisible();
   await expect(panel.getByText(NAME, { exact: true }).first()).toBeVisible();
+  await expect(panel.getByLabel('เลขประจำตัวประชาชน')).toHaveValue('1-2345-67890-12-1');
+  await expect(panel.getByLabel('ที่อยู่', { exact: true })).toHaveValue(ADDRESS);
+  await expect(panel.getByLabel('พิกัดที่อยู่ (ละติจูด, ลองจิจูด)')).toHaveValue('13.756300, 100.501800');
+  await page.screenshot({ path: shot('person-panel') });
 
   // รีโหลดแล้วยังอยู่ (เก็บใน IndexedDB)
   await page.reload();

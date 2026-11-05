@@ -94,7 +94,13 @@ export const DEFAULT_NETWORK_OPTIONS: NetworkViewOptions = {
 };
 
 export interface AccountNote {
+  /** เลขประจำตัวประชาชน (เก็บเป็นตัวเลข 13 หลักเมื่อกรอกครบ) */
+  idCard?: string;
   label?: string;
+  /** ที่อยู่ */
+  address?: string;
+  /** พิกัดที่อยู่ "ละติจูด, ลองจิจูด" */
+  geo?: string;
   note?: string;
   /** รูปบุคคล: data URL JPEG สี่เหลี่ยมจัตุรัสขนาดเล็ก — ไม่คัดลอกเข้า Account เพื่อไม่ให้ถูกส่งไป worker ทุกครั้งที่วิเคราะห์ */
   photo?: string;

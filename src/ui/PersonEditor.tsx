@@ -2,21 +2,15 @@
 import { useRef, useState } from 'preact/hooks';
 import { accounts, cs, notify, setAccountNote } from '../state';
 import { bankDisplay, formatAccountNumber } from '../core/normalize';
-import type { AccountNote } from '../store/model';
+import { draftOf, geoHint, idCardHint, noteOf, type PersonDraft } from '../core/person';
 import { imageFileToAvatar } from './avatar';
 import { Field, Modal } from './common';
 import { Icon } from './icons';
 
-export interface PersonDraft {
-  label: string;
-  note: string;
-  photo?: string;
-}
+export { draftOf, geoHint, idCardHint, noteOf, type PersonDraft } from '../core/person';
 
-export const draftOf = (n: AccountNote | undefined): PersonDraft => ({ label: n?.label ?? '', note: n?.note ?? '', photo: n?.photo });
-
-/** ค่าที่บันทึก: ค่าว่างแปลว่าลบ (setAccountNote ลบคีย์ที่ว่างให้) */
-export const noteOf = (d: PersonDraft): AccountNote => ({ label: d.label.trim(), note: d.note.trim(), photo: d.photo ?? '' });
+const Hint = ({ h }: { h: { text: string; warn: boolean } | null }) =>
+  h ? <span class="tiny" style={{ color: h.warn ? 'var(--warning)' : 'var(--text-3)' }} role={h.warn ? 'alert' : undefined}>{h.text}</span> : null;
 
 export function PersonPhoto({ src, size = 56, alt }: { src?: string; size?: number; alt: string }) {
   return src ? (
@@ -77,6 +71,15 @@ export function PersonFields(props: { draft: PersonDraft; onChange: (d: PersonDr
         </div>
         <input ref={fileRef} type="file" accept="image/*" hidden aria-label="เลือกรูปบุคคล" onChange={(e) => void setPhoto((e.target as HTMLInputElement).files?.[0])} />
       </div>
+      <label class="field">
+        <span>เลขประจำตัวประชาชน</span>
+        <input
+          class="input" value={draft.idCard} placeholder="เช่น 1-2345-67890-12-3" inputMode="numeric" autocomplete="off" maxLength={20}
+          onInput={(e) => props.onChange({ ...draft, idCard: (e.target as HTMLInputElement).value })}
+          onBlur={() => props.onCommit?.(draft)}
+        />
+        <Hint h={idCardHint(draft.idCard)} />
+      </label>
       <Field label="ชื่อ-นามสกุล (ใช้แสดงแทนในทุกหน้า)">
         <input
           class="input" value={draft.label} placeholder="เช่น นายสมมติ ตัวอย่าง"
@@ -84,6 +87,22 @@ export function PersonFields(props: { draft: PersonDraft; onChange: (d: PersonDr
           onBlur={() => props.onCommit?.(draft)}
         />
       </Field>
+      <Field label="ที่อยู่">
+        <textarea
+          class="textarea" rows={2} value={draft.address} placeholder="เช่น บ้านเลขที่ … ถนน … แขวง/ตำบล … เขต/อำเภอ … จังหวัด … รหัสไปรษณีย์"
+          onInput={(e) => props.onChange({ ...draft, address: (e.target as HTMLTextAreaElement).value })}
+          onBlur={() => props.onCommit?.(draft)}
+        />
+      </Field>
+      <label class="field">
+        <span>พิกัดที่อยู่ (ละติจูด, ลองจิจูด)</span>
+        <input
+          class="input" value={draft.geo} placeholder="เช่น 13.756331, 100.501765 หรือวางลิงก์แผนที่ที่มีพิกัด" autocomplete="off"
+          onInput={(e) => props.onChange({ ...draft, geo: (e.target as HTMLInputElement).value })}
+          onBlur={() => props.onCommit?.(draft)}
+        />
+        <Hint h={geoHint(draft.geo)} />
+      </label>
       <Field label="ที่มา / หมายเหตุ">
         <textarea
           class="textarea" rows={3} value={draft.note} placeholder="เช่น ตามข้อมูล KYC เลขที่หนังสือ … / ภาพจาก CCTV วันที่ …"
@@ -91,7 +110,7 @@ export function PersonFields(props: { draft: PersonDraft; onChange: (d: PersonDr
           onBlur={() => props.onCommit?.(draft)}
         />
       </Field>
-      <div class="tiny muted">ชื่อและรูปเป็นข้อมูลที่ผู้สืบสวนบันทึกจากหลักฐานอื่น ระบบไม่ได้ยืนยันว่าเป็นเจ้าของหรือผู้ใช้บัญชีจริง — ควรระบุที่มาไว้เสมอ</div>
+      <div class="tiny muted">เลขบัตร ชื่อ ที่อยู่ พิกัด และรูปเป็นข้อมูลที่ผู้สืบสวนบันทึกจากหลักฐานอื่น ระบบไม่ได้ยืนยันว่าเป็นเจ้าของหรือผู้ใช้บัญชีจริง — ควรระบุที่มาไว้เสมอ · เก็บในเครื่องนี้และในไฟล์คดีเข้ารหัสเท่านั้น</div>
     </div>
   );
 }
@@ -106,14 +125,14 @@ export function PersonModal({ id, onClose }: { id: string; onClose: () => void }
     setSaving(true);
     try {
       await setAccountNote(id, noteOf(draft));
-      notify('บันทึกชื่อ/รูปบุคคลแล้ว');
+      notify('บันทึกข้อมูลบุคคลแล้ว');
       onClose();
     } finally {
       setSaving(false);
     }
   };
   return (
-    <Modal title="ชื่อ-นามสกุล และรูปบุคคล" onClose={onClose} footer={<>
+    <Modal title="ข้อมูลบุคคล" onClose={onClose} footer={<>
       <button class="btn" onClick={onClose}>ยกเลิก</button>
       <button class="btn primary" disabled={saving} onClick={save}>บันทึก</button>
     </>}>
