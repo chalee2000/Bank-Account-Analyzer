@@ -81,6 +81,8 @@ export function NetworkPage() {
   const [handMode, setHandMode] = useState(true);
   /** เต็มจอ: ซ่อนเมนูซ้าย/แถบหัว ให้ผังกินทั้งหน้าต่าง และขอเต็มจอของเบราว์เซอร์ (ถ้ารองรับ) */
   const [full, setFull] = useState(false);
+  /** จำนวนเส้นที่ซ่อนตัวเลขไว้เพราะจะทับป้ายอื่น (จาก declutterLabels) */
+  const [hiddenLabels, setHiddenLabels] = useState(0);
   const fullRef = useRef(false);
   fullRef.current = full;
   const toggleFull = (on = !fullRef.current) => {
@@ -241,8 +243,18 @@ export function NetworkPage() {
         if (e.hasClass('agg-edge')) { go('/transactions', { acc: (e.source().data('owner') ?? e.target().data('owner') ?? e.source().id()) as string }); return; }
         go('/transactions', { acc: e.source().id(), to: e.target().id() });
       });
-      cy.on('mouseover', 'edge', (ev) => { if (!ev.target.hasClass('faded')) ev.target.addClass('hl'); });
-      cy.on('mouseout', 'edge', (ev) => { ev.target.removeClass('hl'); });
+      // ชี้ที่เส้น: เน้นเส้น และถ้าตัวเลขของเส้นนี้ถูกซ่อน (จะทับป้ายอื่น) แสดงชั่วคราวเหนือป้ายอื่น
+      cy.on('mouseover', 'edge', (ev) => {
+        const e = ev.target;
+        if (!e.hasClass('faded')) e.addClass('hl');
+        if (e.hasClass('lbl-hidden')) e.union(cy!.$id('lbl:' + e.id())).removeClass('lbl-hidden').addClass('lbl-peek');
+      });
+      cy.on('mouseout', 'edge', (ev) => {
+        const e = ev.target;
+        e.removeClass('hl');
+        if (e.hasClass('lbl-peek')) e.union(cy!.$id('lbl:' + e.id())).removeClass('lbl-peek').addClass('lbl-hidden');
+      });
+      cy.on('declutter', (_ev, n: number) => setHiddenLabels(n));
       // ลากจุด/โน้ตจัดเอง → จำตำแหน่งในคดี (ลากหลายจุดที่เลือกพร้อมกันก็บันทึกครั้งเดียว)
       cy.on('dragfree', 'node', (ev) => {
         const n = ev.target;
@@ -274,7 +286,7 @@ export function NetworkPage() {
       cy.add(built.elements);
     });
     syncNotes(cy, notesNow(), layoutMode);
-    if (built.nodeCount === 0) return;
+    if (built.nodeCount === 0) { setHiddenLabels(0); return; }
     const saved = cs.peek()?.networkView?.positions?.[layoutMode];
     const plan = planLayout(layoutMode, built.elements, saved);
     const my = ++runSeq.current;
@@ -516,6 +528,11 @@ export function NetworkPage() {
                   : 'ลากจุดเพื่อจัดตำแหน่งเอง ระบบจำไว้ในคดีและใช้ในรายงาน'}
               </div>
               {built && <div class="small secondary">{built.summary}</div>}
+              {built && hiddenLabels > 0 && (
+                <div class="tiny net-hidden-labels" role="status">
+                  ซ่อนตัวเลข {fmtInt(hiddenLabels)} เส้นที่ไม่มีที่ว่าง (จะทับตัวเลข ชื่อ หรือจุดอื่น — คงเส้นยอดสูงกว่าไว้) · ชี้ที่เส้นเพื่อดู หรือคลิกขวาที่เส้น → “แสดงรายละเอียดเส้นนี้ตลอด”
+                </div>
+              )}
               <div class="tiny muted">{built ? `${fmtInt(built.nodeCount)} จุด · ${fmtInt(built.edgeCount)} เส้น` : ''} · คลิกขวา (หรือกดค้าง) ที่จุด เส้น หรือพื้นที่ว่างเพื่อดูคำสั่งเพิ่มเติม · ดับเบิลคลิกพื้นที่ว่างเพื่อขยาย/ย่อเต็มจอ · แตะจุดเพื่อดูรายละเอียด แตะเส้นเพื่อดูธุรกรรม · แตะจุดเส้นประเพื่อดูธุรกรรมของคู่บัญชีที่รวมไว้ · ชี้ที่จุดเพื่ออ่านชื่อเต็ม · ขนาดจุดตามยอดเงินรวม ความหนาเส้นตามยอดโอน</div>
             </div>
           )}

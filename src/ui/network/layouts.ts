@@ -3,7 +3,8 @@
 // ทุกฟังก์ชันเป็น pure — รับจุด/เส้น คืนตำแหน่ง (ทดสอบแบบ headless ได้ และได้ผลเดิมทุกครั้งกับข้อมูลเดิม)
 
 export interface LNode { id: string; role?: string; size?: number; label?: string; fs?: number; tw?: number; ring?: number }
-export interface LEdge { source: string; target: string; total?: number }
+/** labelW: ความกว้างป้ายยอดเงินของเส้นโดยประมาณ (ค่ามากกว่าระหว่างแบบปกติ/การ์ด — ตำแหน่งจึงไม่เปลี่ยนตามการเปิดป้าย) */
+export interface LEdge { source: string; target: string; total?: number; labelW?: number }
 export type Pos = { x: number; y: number };
 
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -22,6 +23,16 @@ export function nodeBox(n: LNode): { w: number; h: number } {
     lw = Math.max(lw, Math.min(w, tw));
   }
   return { w: Math.max(size, lw), h: size + lines * fs * 1.3 + 8 };
+}
+
+/** ความกว้างข้อความโดยประมาณ (บรรทัดที่ยาวที่สุด) — สระ/วรรณยุกต์ไทยบน-ล่างไม่กินที่ */
+export function labelTextWidth(text: string, fs: number): number {
+  return Math.max(0, ...text.split('\n').map((l) => l.replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, '').length * fs * 0.56));
+}
+
+/** ความกว้างป้ายยอดเงินบนเส้น (ตัวอักษร 9.5): แบบปกติ 1 บรรทัด หรือแบบการ์ดที่มีกรอบ — เอาค่าที่กว้างกว่า */
+export function edgeLabelWidth(label?: string, card?: string): number {
+  return Math.round(Math.max(label ? labelTextWidth(label, 9.5) + 4 : 0, card ? labelTextWidth(card, 9.5) + 12 : 0));
 }
 
 interface Graph {
@@ -446,7 +457,14 @@ export function orgPositions(nodes: LNode[], edges: LEdge[]): { pos: Record<stri
       }
     }
   }
-  const w = (id: string) => nodeBox(g.byId.get(id)!).w + ORG.gapX;
+  // ป้ายยอดเงินของเส้นจากแม่อยู่เหนือลูกแต่ละราย → คอลัมน์ของลูกต้องกว้างพอทั้งจุด+ชื่อ และป้ายยอดเงิน (พี่น้องจึงไม่มีป้ายทับกัน)
+  const lw = new Map<string, number>();
+  for (const e of edges) {
+    if (!e.labelW) continue;
+    const child = parent[e.target] === e.source ? e.target : parent[e.source] === e.target ? e.source : undefined;
+    if (child) lw.set(child, Math.max(lw.get(child) ?? 0, e.labelW));
+  }
+  const w = (id: string) => Math.max(nodeBox(g.byId.get(id)!).w, lw.get(id) ?? 0) + ORG.gapX;
   const subW = new Map<string, number>();
   const measure = (u: string): number => {
     const cs = children.get(u)!;

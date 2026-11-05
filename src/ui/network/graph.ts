@@ -12,7 +12,7 @@ import type { Account, AnalysisResult } from '../../core/types';
 import type { CaseState, Derived, LayoutMode, NetNote, NetworkViewOptions, SavedPositions } from '../../store/model';
 import { bankDisplay, formatAccountNumber } from '../../core/normalize';
 import { fmtBaht, formatThaiDate } from '../../core/thai';
-import { hierarchyPositions, orgPositions, packedPositions, peacockPositions, type LEdge, type LNode } from './layouts';
+import { edgeLabelWidth, hierarchyPositions, orgPositions, packedPositions, peacockPositions, type LEdge, type LNode } from './layouts';
 
 export type ColorBy = 'role' | 'bank' | 'community';
 export type Scope = 'core' | 'all';
@@ -489,7 +489,7 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
     const flow = fCol ? ['flow', fCol.get(src) === 'src' ? 'flow-h' : 'flow-v', ...(fDir === 'h' ? ['flow-x'] : [])] : opts.orgEdges ? ['org'] : [];
     const pill = flowPill(total, count);
     return {
-      data: { label: `${fmtBaht(total)} ฿ ×${count}`, card, key: `${src}>${dst}`, ...(fCol ? { pill, pillText: `${pill} ▸`, toff: FLOW_LABEL_OFFSET, z: 30 } : {}) },
+      data: { label: `${fmtBaht(total)} ฿ ×${count}`, card, key: `${src}>${dst}`, pin: pin ? 1 : 0, ...(fCol ? { pill, pillText: `${pill} ▸`, toff: FLOW_LABEL_OFFSET, z: 30 } : {}) },
       cls: [...new Set([...flow, ...cls.filter(Boolean)])],
     };
   };
@@ -623,6 +623,8 @@ export function makeStyle(pal: Palette): StylesheetJson {
     { selector: '.faded', style: { opacity: 0.1, 'underlay-opacity': 0 } },
     { selector: 'node.hl', style: { 'border-color': pal.accent, 'border-width': 4, 'underlay-opacity': 0.4, 'z-index': 40 } },
     { selector: 'edge.hl', style: { opacity: 0.95, label: 'data(label)', 'z-index': 40 } },
+    // แบบการ์ด: ชี้ที่เส้นแล้วยังเป็นการ์ดเหมือนเดิม (ไม่ย่อเหลือบรรทัดเดียว)
+    { selector: 'edge.lbl-card.hl', style: { label: 'data(card)' } },
     // ผังไหลเงิน: ป้ายอยู่ข้างจุด ไม่ให้เส้นแนวดิ่งของเลนผ่านตัวหนังสือ (ผู้โอนเข้า: ซ้ายของจุด, ขั้นบันได/ผู้รับ: ขวาของจุด)
     { selector: 'node[fcol = "src"]', style: { 'text-halign': 'left', 'text-valign': 'center', 'text-margin-x': -7, 'text-margin-y': 0, 'text-justification': 'right' } },
     { selector: 'node[fcol = "hub"], node[fcol = "sink"]', style: { 'text-halign': 'right', 'text-valign': 'center', 'text-margin-x': 7, 'text-margin-y': 0, 'text-justification': 'left' } },
@@ -659,16 +661,33 @@ export function makeStyle(pal: Palette): StylesheetJson {
     { selector: 'edge.org', style: { 'curve-style': 'round-taxi', 'taxi-direction': 'vertical', 'taxi-turn': '50%', 'taxi-radius': 8, 'taxi-turn-min-distance': 6 } },
     { selector: 'edge.org.org-up', style: { 'taxi-turn': '32%' } },
     // เส้นระหว่างบัญชีในชั้นเดียวกัน: โค้งข้ามด้านบน ไม่วิ่งทับแถวผ่านจุดที่อยู่ระหว่างกลาง
-    { selector: 'edge.org.org-flat', style: { 'curve-style': 'unbundled-bezier', 'control-point-distances': [-70], 'control-point-weights': [0.5] } },
+    // โค้งสูงพอให้ป้ายกลางเส้นพ้นวงกลมของจุดที่อยู่ระหว่างกลาง; ระยะโค้งวัดจากทิศต้นทาง→ปลายทาง: เส้นที่ไปทางซ้ายต้องกลับเครื่องหมาย
+    // ไม่เช่นนั้นจะโค้งลงทับชื่อบัญชีใต้จุด
+    { selector: 'edge.org.org-flat', style: { 'curve-style': 'unbundled-bezier', 'control-point-distances': [-90], 'control-point-weights': [0.5] } },
+    { selector: 'edge.org.org-flat.org-rtl', style: { 'control-point-distances': [90] } },
     { selector: 'edge.org.hl', style: { 'z-index': 400 } },
+    // Organization: ป้ายอยู่บนท่อนแนวดิ่งสั้น ๆ เหนือบัญชีชั้นล่าง (ปลายล่างของเส้น) ไม่ใช่กลางเส้นแนวนอนร่วม —
+    // แต่ละบัญชีมีคอลัมน์ของตัวเอง; หลายเส้นที่ลงบัญชีเดียวกันซ้อนป้ายขึ้นไปทีละขั้นตามระยะใน data(toff)
+    { selector: 'edge.org.hl, edge.org.lbl-plain, edge.org.lbl-pin', style: { label: '', 'target-label': 'data(label)', 'target-text-offset': 'data(toff)' } },
+    { selector: 'edge.org.org-up.hl, edge.org.org-up.lbl-plain, edge.org.org-up.lbl-pin', style: { 'target-label': '', 'source-label': 'data(label)', 'source-text-offset': 'data(toff)' } },
+    { selector: 'edge.org.org-flat.hl, edge.org.org-flat.lbl-plain, edge.org.org-flat.lbl-pin', style: { label: 'data(label)', 'target-label': '', 'source-label': '' } },
+    { selector: 'edge.org.lbl-card', style: { label: '', 'target-label': 'data(card)', 'target-text-offset': 'data(toff)' } },
+    { selector: 'edge.org.org-up.lbl-card', style: { 'target-label': '', 'source-label': 'data(card)', 'source-text-offset': 'data(toff)' } },
+    { selector: 'edge.org.org-flat.lbl-card', style: { label: 'data(card)', 'target-label': '', 'source-label': '' } },
     // เส้นพาป้าย: มองไม่เห็นเส้น/หัวลูกศร (หัวลูกศรใช้ความทึบตาม line-opacity), คลิกทะลุไปถึงเส้นจริง, วาดหลังเส้นเงินทุกเส้น
     {
       selector: 'edge.elabel',
       style: { 'line-opacity': 0, label: '', events: 'no', 'z-index': 500, 'underlay-opacity': 0, 'overlay-opacity': 0, 'text-events': 'no' },
     },
-    // Organization ใช้ป้ายกลางเส้น (ไม่ใช่ป้ายปลายเส้น) — เส้นพาป้ายของรูปแบบนี้จึงคงป้ายกลางไว้
-    { selector: 'edge.elabel.org.lbl-plain, edge.elabel.org.lbl-pin', style: { label: 'data(label)' } },
-    { selector: 'edge.elabel.org.lbl-card', style: { label: 'data(card)' } },
+    // เส้นในชั้นเดียวกันของ Organization ใช้ป้ายกลางเส้น — เส้นพาป้ายของเส้นแบบนี้จึงคงป้ายกลางไว้
+    { selector: 'edge.elabel.org.org-flat.lbl-plain, edge.elabel.org.org-flat.lbl-pin', style: { label: 'data(label)' } },
+    { selector: 'edge.elabel.org.org-flat.lbl-card', style: { label: 'data(card)' } },
+    // ป้ายที่กลางเส้นไม่ว่าง: เลื่อนไปตามเส้น (ระยะจากต้นทางใน data(loff)) — declutterLabels
+    { selector: 'edge.lbl-moved', style: { label: '', 'source-label': 'data(label)', 'source-text-offset': 'data(loff)' } },
+    { selector: 'edge.lbl-moved.lbl-card', style: { 'source-label': 'data(card)' } },
+    // ป้ายที่ไม่มีที่ว่าง: ซ่อนไว้ — ชี้ที่เส้นแล้วแสดงชั่วคราวเหนือป้ายอื่น (lbl-peek)
+    { selector: 'edge.lbl-hidden', style: { label: '', 'source-label': '', 'target-label': '' } },
+    { selector: 'edge.lbl-peek', style: { 'z-index': 600 } },
   ] as unknown as StylesheetJson;
 }
 
@@ -1163,8 +1182,7 @@ export function flowRefresh(cy: cytoscapeNS.Core): void {
   const es = cy.edges('.flow').not('.elabel');
   const orgEs = cy.edges('.org').not('.elabel');
   const carriers = cy.edges('.elabel');
-  if (es.empty() && orgEs.empty() && carriers.empty()) return;
-  cy.batch(() => {
+  if (es.nonempty() || orgEs.nonempty() || carriers.nonempty()) cy.batch(() => {
     es.forEach((e) => {
       // แนวนอน: คิดในกรอบของแนวตั้ง (สลับ x/y) แล้วใช้ตรรกะเดียวกันทั้งหมด
       const flowX = e.hasClass('flow-x');
@@ -1186,14 +1204,25 @@ export function flowRefresh(cy: cytoscapeNS.Core): void {
         : flowLabelOffset(route, e.target().data('fcol') as string | undefined, s, t, (e.target().data('size') as number) || 20, card));
       e.data('z', route === 'flow-v' ? 60 - Math.min(50, Math.round(Math.abs(t.x - s.x) / 40)) : 30);
     });
-    // Organization: เส้นที่ขึ้น (ต้นทางอยู่ต่ำกว่า) เลี้ยวคนละระดับกับเส้นลง
+    // Organization: เส้นที่ขึ้น (ต้นทางอยู่ต่ำกว่า) เลี้ยวคนละระดับกับเส้นลง; ป้ายอยู่ที่ปลายล่างของเส้น ซ้อนกันตามลำดับใน orgLabelOffsets
+    const ends: OrgLabelEnd[] = [];
     orgEs.forEach((e) => {
       const dy = e.target().position('y') - e.source().position('y');
       const up = dy < -1;
       const flat = Math.abs(dy) <= 1;
       if (up !== e.hasClass('org-up')) e.toggleClass('org-up', up);
       if (flat !== e.hasClass('org-flat')) e.toggleClass('org-flat', flat);
+      const rtl = flat && e.target().position('x') < e.source().position('x');
+      if (rtl !== e.hasClass('org-rtl')) e.toggleClass('org-rtl', rtl);
+      if (flat) return;
+      const card = e.hasClass('lbl-card');
+      ends.push({
+        id: e.id(), lower: up ? e.source().id() : e.target().id(), up, total: (e.data('total') as number) || 0,
+        lines: card ? String(e.data('card') ?? '').split('\n').length : 1, card, width: (e.data('width') as number) || 1,
+      });
     });
+    const offs = orgLabelOffsets(ends);
+    for (const [id, off] of offs) cy.getElementById(id).data('toff', off);
     const want = new Set<string>();
     es.union(orgEs).forEach((e) => {
       if (!e.hasClass('lbl-plain') && !e.hasClass('lbl-pin') && !e.hasClass('lbl-card')) return;
@@ -1207,6 +1236,182 @@ export function flowRefresh(cy: cytoscapeNS.Core): void {
     });
     cy.edges('.elabel').forEach((c) => { if (!want.has(c.id())) c.remove(); });
   });
+  declutterLabels(cy);
+}
+
+/** ปลายล่างของเส้นใน Organization: บัญชีที่ป้ายของเส้นนี้ไปอยู่ด้านบน */
+export interface OrgLabelEnd { id: string; lower: string; up: boolean; total: number; lines: number; card: boolean; width: number }
+
+/** ความสูงป้ายโดยประมาณ (หน่วยของผัง): ปกติ 1 บรรทัด / การ์ดหลายบรรทัดมีกรอบ */
+export const orgLabelHeight = (lines: number, card: boolean): number => (card ? lines * 12 + 10 : 14);
+
+/** ความยาวหัวลูกศรของเส้นกว้าง w (arrow-scale 0.85 แบบสามเหลี่ยมของ Cytoscape) — ป้ายที่ปลายหัวลูกศรต้องพ้นหัวลูกศร */
+const arrowLen = (w: number): number => 0.3 * 0.85 * Math.max(Math.pow(w * 13.37, 0.9), 29);
+
+/**
+ * ระยะป้าย (จากขอบบัญชีชั้นล่างขึ้นไปตามเส้น) ของเส้นใน Organization: เส้นทั้งหมดที่มีปลายล่างที่บัญชีเดียวกันวิ่งบนเส้นแนวดิ่งเดียวกัน
+ * จึงซ้อนป้ายขึ้นไปทีละขั้นไม่ให้ทับกัน — เส้นขึ้น (ท่อนแนวดิ่งสั้นกว่า เพราะเลี้ยวต่ำกว่า) อยู่ล่างสุด แล้วเส้นลงตามยอดเงินจากมากไปน้อย
+ */
+export function orgLabelOffsets(ends: OrgLabelEnd[]): Map<string, number> {
+  const groups = new Map<string, OrgLabelEnd[]>();
+  for (const e of ends) {
+    const g = groups.get(e.lower);
+    if (g) g.push(e); else groups.set(e.lower, [e]);
+  }
+  const out = new Map<string, number>();
+  for (const g of groups.values()) {
+    g.sort((a, b) => Number(b.up) - Number(a.up) || b.total - a.total || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    let cur = 6;
+    for (const e of g) {
+      const h = orgLabelHeight(e.lines, e.card);
+      const start = e.up ? cur : Math.max(cur, arrowLen(e.width) + 4);
+      out.set(e.id, Math.round(start + h / 2));
+      cur = start + h + 5;
+    }
+  }
+  return out;
+}
+
+/** กรอบสี่เหลี่ยม (หน่วยของผัง) */
+export interface Box { x1: number; y1: number; x2: number; y2: number }
+
+/** ป้ายของเส้นหนึ่งเส้นสำหรับ declutter: ตำแหน่งที่วางได้เรียงตามลำดับที่อยากได้ (ตัวแรก = ตำแหน่งปกติ) */
+export interface LabelItem { id: string; total: number; fixed?: boolean; cands: Box[]; /** ลำดับชั้น (น้อย = วางก่อน) ก่อนเทียบยอดเงิน */ rank?: number }
+
+/**
+ * จัดป้ายไม่ให้ทับกัน: สิ่งกีดขวางตายตัว (วงกลม/ชื่อบัญชี, ป้ายของเส้นที่ปักไว้หรือที่ผู้สืบสวนเชื่อมเอง) วางก่อนเสมอ
+ * แล้วป้ายยอดเงินตามยอดจากมากไปน้อย — ใช้ตำแหน่งแรกที่ว่าง (เลื่อนไปตามเส้นได้) ถ้าไม่มีที่ว่างเลยจึงซ่อน
+ * คืน id ที่ต้องซ่อน และลำดับตำแหน่งที่เลือกของป้ายที่ไม่ได้อยู่ตำแหน่งปกติ — ใช้ตารางช่องช่วยค้น จึงเร็วพอกับผังหลายพันเส้น
+ */
+export function declutter(items: LabelItem[], pad = 2): { hidden: Set<string>; moved: Map<string, number> } {
+  const CELL = 96;
+  const ok = (b: Box) => Number.isFinite(b.x1) && Number.isFinite(b.y1) && b.x2 > b.x1 && b.y2 > b.y1;
+  const order = items
+    .filter((it) => it.cands.length && ok(it.cands[0]!))
+    .sort((a, b) => Number(!!b.fixed) - Number(!!a.fixed) || (a.rank ?? 0) - (b.rank ?? 0) || b.total - a.total || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const grid = new Map<string, Box[]>();
+  const cells = (b: Box, f: (k: string) => void) => {
+    for (let cx = Math.floor(b.x1 / CELL); cx <= Math.floor(b.x2 / CELL); cx++) {
+      for (let cy = Math.floor(b.y1 / CELL); cy <= Math.floor(b.y2 / CELL); cy++) f(cx + ',' + cy);
+    }
+  };
+  const hits = (a: Box, b: Box) => a.x1 < b.x2 + pad && b.x1 < a.x2 + pad && a.y1 < b.y2 + pad && b.y1 < a.y2 + pad;
+  const free = (b: Box) => {
+    let clash = false;
+    cells(b, (k) => { if (!clash) clash = (grid.get(k) ?? []).some((o) => hits(b, o)); });
+    return !clash;
+  };
+  const take = (b: Box) => cells(b, (k) => { const l = grid.get(k); if (l) l.push(b); else grid.set(k, [b]); });
+  const hidden = new Set<string>();
+  const moved = new Map<string, number>();
+  for (const it of order) {
+    if (it.fixed) { take(it.cands[0]!); continue; }
+    const i = it.cands.findIndex((b) => ok(b) && free(b));
+    if (i < 0) { hidden.add(it.id); continue; }
+    take(it.cands[i]!);
+    if (i > 0) moved.set(it.id, i);
+  }
+  return { hidden, moved };
+}
+
+/** ตำแหน่งตามความยาวเส้น (สัดส่วนจากต้นทาง) ที่ลองวางป้ายเมื่อกลางเส้นไม่ว่าง — ใกล้กลางเส้นก่อน แต่ไม่ชิดปลายเส้น */
+export const LABEL_SLIDE = [0.5, 0.36, 0.64, 0.26, 0.74];
+
+/**
+ * เส้นตามที่ Cytoscape วาด: ปลายต้นทาง → (จุดควบคุม …) → ปลายปลายทาง เป็น quadratic bezier ต่อกันผ่านจุดกึ่งกลางระหว่างจุดควบคุม
+ * (ไม่มีจุดควบคุม = เส้นตรง) — คืนตัวหาจุดที่สัดส่วนความยาว f และความยาวโค้งจากต้นทางถึงจุดนั้น
+ */
+export function edgePath(src: Pos, tgt: Pos, ctrl?: Pos[]): { at: (f: number) => { p: Pos; dist: number }; length: number } {
+  const pts: Pos[] = [src];
+  const cps = ctrl ?? [];
+  const q = (a: Pos, b: Pos, c: Pos, t: number): Pos => ({
+    x: (1 - t) * (1 - t) * a.x + 2 * (1 - t) * t * b.x + t * t * c.x,
+    y: (1 - t) * (1 - t) * a.y + 2 * (1 - t) * t * b.y + t * t * c.y,
+  });
+  if (!cps.length) pts.push(tgt);
+  else {
+    let start = src;
+    cps.forEach((c, i) => {
+      const end = i === cps.length - 1 ? tgt : { x: (c.x + cps[i + 1]!.x) / 2, y: (c.y + cps[i + 1]!.y) / 2 };
+      for (let k = 1; k <= 24; k++) pts.push(q(start, c, end, k / 24));
+      start = end;
+    });
+  }
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1]! + Math.hypot(pts[i]!.x - pts[i - 1]!.x, pts[i]!.y - pts[i - 1]!.y));
+  const length = cum[cum.length - 1]!;
+  const at = (f: number) => {
+    const d = Math.max(0, Math.min(1, f)) * length;
+    let i = 1;
+    while (i < pts.length - 1 && cum[i]! < d) i++;
+    const seg = cum[i]! - cum[i - 1]!;
+    const t = seg > 0 ? (d - cum[i - 1]!) / seg : 0;
+    const a = pts[i - 1]!;
+    const b = pts[i] ?? a;
+    return { p: { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, dist: d };
+  };
+  return { at, length };
+}
+
+const BODY_BB = {
+  includeNodes: true, includeEdges: false, includeLabels: false, includeOverlays: false, includeUnderlays: false, includeOutlines: false,
+};
+const LABEL_BB = {
+  includeNodes: false, includeEdges: false, includeLabels: true, includeMainLabels: true, includeSourceLabels: true, includeTargetLabels: true,
+  includeOverlays: false, includeUnderlays: false, includeOutlines: false,
+};
+
+/**
+ * ป้ายยอดเงินต้องอ่านออกเสมอ (ทุกรูปแบบการจัดผัง): วัดกรอบป้ายจริงของแต่ละเส้น (ใช้เส้นพาป้ายถ้ามี)
+ * สิ่งกีดขวางตายตัว = วงกลมและชื่อของทุกจุด; เส้นทั่วไป (ไม่ใช่ผังไหลเงิน/Organization ซึ่งวางป้ายไว้เฉพาะที่แล้ว) เลื่อนป้ายไปตามเส้นได้ (lbl-moved)
+ * ป้ายที่ไม่มีที่ว่างได้คลาส lbl-hidden — ขนาดตัวอักษรอยู่ในหน่วยของผัง ผลจึงไม่ขึ้นกับระดับซูม
+ * (ชื่อเจ้าของ Statement ที่ขยายตามการซูมออก วัดที่ขนาดปกติ); ส่งเหตุการณ์ "declutter" พร้อมจำนวนที่ซ่อน
+ */
+export function declutterLabels(cy: cytoscapeNS.Core): number {
+  cy.batch(() => cy.edges('.lbl-hidden, .lbl-peek, .lbl-moved').removeClass('lbl-hidden lbl-peek lbl-moved'));
+  const labelled = cy.edges('.lbl-plain, .lbl-pin, .lbl-card, .manual-link').not('.elabel');
+  const items: LabelItem[] = [];
+  const paths = new Map<string, ReturnType<typeof edgePath>>();
+  if (labelled.nonempty()) {
+    cy.nodes().forEach((n) => {
+      const body = n.boundingBox(BODY_BB as never);
+      items.push({ id: '\u0000b' + n.id(), total: 0, fixed: true, cands: [body] });
+      if (n.hasClass('note') || n.hasClass('agg')) return;
+      const lb = n.boundingBox(LABEL_BB as never);
+      if (!(lb.w > 0)) return;
+      // ชื่อเจ้าของขยายตามการซูมออก (scaleOwnerLabels) → ใช้ขนาดปกติ ผลจึงไม่ขึ้นกับระดับซูมขณะคำนวณ
+      const k = n.hasClass('owner') && !n.data('flow') ? Math.max(1, ((n.data('fs') as number) || OWNER_LABEL_FONT) / OWNER_LABEL_FONT) : 1;
+      const cx = (lb.x1 + lb.x2) / 2;
+      items.push({ id: '\u0000l' + n.id(), total: 0, fixed: true, cands: [{ x1: cx - lb.w / k / 2, x2: cx + lb.w / k / 2, y1: lb.y1, y2: lb.y1 + lb.h / k }] });
+    });
+  }
+  labelled.forEach((e) => {
+    const c = cy.getElementById('lbl:' + e.id());
+    const bb = (c.nonempty() ? c : e).boundingBox(LABEL_BB as never);
+    const cands: Box[] = [{ x1: bb.x1, y1: bb.y1, x2: bb.x2, y2: bb.y2 }];
+    const fixed = e.data('pin') === 1 || e.hasClass('manual-link');
+    // Organization: เส้นในชั้นเดียวกัน (โค้งข้าม) ให้ที่ว่างแก่ป้ายของสายแม่-ลูกก่อน และเลื่อนไปตามโค้งได้; ผังไหลเงิน/สายแม่-ลูก วางป้ายเฉพาะที่แล้ว
+    const flat = e.hasClass('org-flat');
+    if (!fixed && !e.hasClass('flow') && (!e.hasClass('org') || flat) && bb.w > 0) {
+      const path = edgePath(e.sourceEndpoint(), e.targetEndpoint(), e.controlPoints() as Pos[] | undefined);
+      paths.set(e.id(), path);
+      const mid = path.at(0.5).p;
+      for (const f of LABEL_SLIDE.slice(1)) {
+        const p = path.at(f).p;
+        cands.push({ x1: bb.x1 + p.x - mid.x, y1: bb.y1 + p.y - mid.y, x2: bb.x2 + p.x - mid.x, y2: bb.y2 + p.y - mid.y });
+      }
+    }
+    items.push({ id: e.id(), total: (e.data('total') as number) || 0, fixed, cands, rank: flat ? 1 : 0 });
+  });
+  const { hidden, moved } = declutter(items);
+  if (hidden.size || moved.size) {
+    cy.batch(() => {
+      hidden.forEach((id) => cy.$id(id).union(cy.$id('lbl:' + id)).addClass('lbl-hidden'));
+      moved.forEach((i, id) => cy.$id(id).union(cy.$id('lbl:' + id)).data('loff', Math.round(paths.get(id)!.at(LABEL_SLIDE[i]!).dist)).addClass('lbl-moved'));
+    });
+  }
+  cy.emit('declutter', [hidden.size]);
+  return hidden.size;
 }
 
 /**
@@ -1275,7 +1480,10 @@ export function runLayoutPlan(cy: cytoscapeNS.Core, plan: LayoutPlan, nodeCount:
       id: n.id(), role: n.data('role') as string, size: n.data('size') as number | undefined, label: n.data('label') as string | undefined,
       fs: n.data('fs') as number | undefined, tw: n.data('tw') as number | undefined, ring: n.data('ring') as number | undefined,
     }));
-    const es: LEdge[] = graph.edges().not('.elabel').map((e: cytoscapeNS.EdgeSingular) => ({ source: e.source().id(), target: e.target().id(), total: (e.data('total') as number) || 0 }));
+    const es: LEdge[] = graph.edges().not('.elabel').map((e: cytoscapeNS.EdgeSingular) => ({
+      source: e.source().id(), target: e.target().id(), total: (e.data('total') as number) || 0,
+      labelW: edgeLabelWidth(e.data('label') as string | undefined, e.data('card') as string | undefined),
+    }));
     const pos = plan.algo === 'peacock' ? peacockPositions(ns, es) : plan.algo === 'packed' ? packedPositions(ns, es)
       : plan.algo === 'hierarchy' ? hierarchyPositions(ns, es) : orgPositions(ns, es).pos;
     layout = graph.nodes().layout({ name: 'preset', positions: (n: cytoscapeNS.NodeSingular) => pos[n.id()] ?? n.position(), animate, animationDuration: 450, fit: false } as never);
@@ -1317,6 +1525,8 @@ export async function renderNetworkImage(
 ): Promise<{
   dataUrl: string; nodeCount: number; edgeCount: number; legend: BuiltGraph['legend']; summary: string;
   layout: LayoutMode; usedSavedPositions: boolean; manualPositions: boolean;
+  /** จำนวนเส้นที่ไม่แสดงตัวเลขเพราะจะทับป้ายอื่น */
+  hiddenLabels: number;
 } | null> {
   const built = buildElements(d, res, st, {
     scope: 'core', topPerOwner: 12, minAmount: 0, showCash: true, colorBy: 'role', showManual: true, ...opts,
@@ -1332,6 +1542,7 @@ export async function renderNetworkImage(
     // ใช้ตำแหน่ง/รูปแบบเดียวกับที่ผู้สืบสวนจัดไว้บนหน้าเครือข่าย
     const plan = planLayout(layout.mode, built.elements, layout.saved);
     await runLayoutPlan(cy, plan, built.nodeCount);
+    const hiddenLabels = cy.edges('.lbl-hidden').not('.elabel').length;
     if (layout.notes?.length) cy.add(noteElements(layout.notes, layout.mode));
     // ผังไหลเงิน: ความสูงภาพตามสัดส่วนผัง — แนวตั้งสูงขึ้นได้ (ไม่เกินราวหนึ่งหน้า A4) ไม่ให้ถูกย่อจนอ่านไม่ออก,
     // แนวนอน (ผังกว้าง) เตี้ยลงได้ ไม่เหลือที่ว่างบน/ล่างมาก
@@ -1355,7 +1566,7 @@ export async function renderNetworkImage(
     cy.destroy();
     return {
       dataUrl, nodeCount: built.nodeCount, edgeCount: built.edgeCount, legend: built.legend, summary: built.summary,
-      layout: layout.mode, usedSavedPositions: plan.kind === 'preset', manualPositions: plan.kind === 'preset' && !!layout.saved?.manual,
+      layout: layout.mode, usedSavedPositions: plan.kind === 'preset', manualPositions: plan.kind === 'preset' && !!layout.saved?.manual, hiddenLabels,
     };
   } finally {
     host.remove();

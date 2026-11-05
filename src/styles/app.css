@@ -351,6 +351,7 @@ table.tbl { border-collapse: separate; border-spacing: 0; width: 100%; font-size
 /* สถานะตำแหน่งที่จัดเองในแผงเครื่องมือผัง */
 .net-pos-status { color: var(--text-3); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .net-pos-status[data-manual='1'] { color: var(--accent); font-weight: 600; }
+.net-hidden-labels { color: var(--text-2); }
 
 /* กดค้างบนผังในจอสัมผัส: ไม่ให้ iOS เด้งเมนูคัดลอก/เลือกข้อความแทนเมนูของแอป */
 .net-canvas [role='img'] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }

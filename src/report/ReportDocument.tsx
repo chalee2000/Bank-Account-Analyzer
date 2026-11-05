@@ -41,7 +41,7 @@ export interface ReportData {
   opts: ReportOptions;
   net: {
     dataUrl: string; nodeCount: number; edgeCount: number; legend: { label: string; color: string }[]; summary?: string;
-    layout?: LayoutMode; manualPositions?: boolean;
+    layout?: LayoutMode; manualPositions?: boolean; hiddenLabels?: number;
   } | null;
   traces: { label: string; direction: 'forward' | 'backward'; result: TraceResult }[];
   generatedAt: number;
@@ -251,6 +251,7 @@ export function ReportDocument({ data }: { data: ReportData }) {
                 {data.net.layout === 'flowh' && ' · รูปแบบผังไหลเงินแนวนอน: ผู้โอนเข้าอยู่แถวบน บัญชีเจ้าของ/ทางผ่านเรียงเป็นขั้นบันได (แต่ละบัญชีมีเส้นแนวนอนของตัวเอง) ผู้รับอยู่แถวล่าง ป้ายบนเส้น = ยอดรวมปัดเป็นบาท (จำนวนครั้ง) ลูกศรบอกทิศทางเงิน'}
                 {data.net.layout === 'flow' && ' · รูปแบบผังไหลเงินแนวตั้ง: ผู้โอนเข้าอยู่คอลัมน์ซ้าย บัญชีเจ้าของ/ทางผ่านเรียงเป็นขั้นบันได (แต่ละบัญชีมีเส้นแนวดิ่งของตัวเอง) ผู้รับอยู่คอลัมน์ขวา ป้ายบนเส้น = ยอดรวมปัดเป็นบาท (จำนวนครั้ง) ลูกศรบอกทิศทางเงิน'}
                 {data.net.manualPositions && ' · จัดตำแหน่งตามที่ผู้สืบสวนจัดไว้บนหน้าเครือข่าย'}
+                {!!data.net.hiddenLabels && ` · ไม่แสดงตัวเลขบนเส้น ${fmtInt(data.net.hiddenLabels)} เส้นที่ไม่มีที่ว่าง (จะทับตัวเลข ชื่อ หรือจุดอื่น — คงไว้เส้นที่ยอดสูงกว่าและเส้นที่ปักไว้) ยอดของคู่บัญชีดูได้ในหัวข้อคู่บัญชีสำคัญ`}
                 {data.net.legend.length > 0 && <> · สี: {data.net.legend.map((l) => <span key={l.label} class="rpt-sw"><i style={{ background: l.color }} />{l.label}</span>)}</>}</figcaption>
             </figure>
           ) : <p class="rpt-note">ไม่มีข้อมูลเครือข่ายสำหรับแสดง</p>}

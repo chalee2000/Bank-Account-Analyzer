@@ -443,3 +443,132 @@ test('รูปแบบ Peacock / Packed / Hierarchy / Organization: เลื�
 
   expect(errors.filter((e) => !/favicon|manifest/i.test(e))).toEqual([]);
 });
+
+test('ตัวเลขยอดเงินบนเส้นไม่ทับกันในทุกรูปแบบ (ปกติ/การ์ด): เลื่อนหรือซ่อนป้ายที่ไม่มีที่ว่าง ชี้แล้วเห็น และรายงานบอกจำนวน', async ({ page }) => {
+  test.setTimeout(180_000);
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'ทดลองด้วยข้อมูลสมมติ' }).click();
+  await expect(page.getByText('ภาพรวมคดี')).toBeVisible();
+  await page.goto('/#/network');
+  await waitGraph(page);
+  await page.getByRole('button', { name: 'ทุกบัญชี', exact: true }).click();
+  await page.waitForTimeout(900);
+
+  /** กรอบป้ายที่มองเห็น (ใช้เส้นพาป้ายถ้ามี) และวงกลมของจุด — หน่วยของผัง */
+  const measure = () => page.evaluate((sel) => {
+    const cy = (document.querySelector(sel) as any).__cy;
+    const L = { includeNodes: false, includeEdges: false, includeLabels: true, includeOverlays: false, includeUnderlays: false, includeOutlines: false };
+    const B = { includeNodes: true, includeEdges: false, includeLabels: false, includeOverlays: false, includeUnderlays: false, includeOutlines: false };
+    const all = cy.edges('.lbl-plain, .lbl-pin, .lbl-card').not('.elabel');
+    const vis: { id: string; x1: number; y1: number; x2: number; y2: number }[] = [];
+    all.not('.lbl-hidden').forEach((e: any) => {
+      const c = cy.getElementById('lbl:' + e.id());
+      const bb = (c.nonempty() ? c : e).boundingBox(L);
+      if (bb.w > 0) vis.push({ id: e.id(), x1: bb.x1, y1: bb.y1, x2: bb.x2, y2: bb.y2 });
+    });
+    const bodies = cy.nodes().map((n: any) => n.boundingBox(B));
+    const hit = (a: any, b: any) => a.x1 < b.x2 - 0.5 && b.x1 < a.x2 - 0.5 && a.y1 < b.y2 - 0.5 && b.y1 < a.y2 - 0.5;
+    let labelOverlaps = 0;
+    for (let i = 0; i < vis.length; i++) for (let j = i + 1; j < vis.length; j++) if (hit(vis[i], vis[j])) labelOverlaps++;
+    const onNodes = vis.filter((v) => bodies.some((b: any) => hit(v, b))).length;
+    return { labelled: all.length, visible: vis.length, hidden: all.filter('.lbl-hidden').length, moved: all.filter('.lbl-moved').length, labelOverlaps, onNodes };
+  }, HOST);
+
+  const steps: string[][] = [['อัตโนมัติ'], ['วงซ้อน'], ['ผังไหลเงิน', 'แนวนอน'], ['ผังไหลเงิน', 'แนวตั้ง'], ['Peacock'], ['Hierarchy'], ['Organization'], ['Packed']];
+  const box = (await page.locator(HOST).boundingBox())!;
+  let totalHidden = 0;
+  let totalMoved = 0;
+  for (const [mode, item] of [['plain', 'แสดงรายละเอียดเส้นเงินทุกเส้น'], ['card', 'แสดงรายละเอียดเส้นเงินทุกเส้น แบบการ์ด']] as const) {
+    for (const step of steps) {
+      for (const name of step) await page.getByRole('button', { name, exact: true }).click();
+      await page.waitForTimeout(1000);
+      const on = await page.evaluate(([sel, m]) => (document.querySelector(sel!) as any).__cy.edges('.lbl-' + m).nonempty(), [HOST, mode]);
+      if (!on) {
+        await page.mouse.click(Math.round(box.x + box.width - 24), Math.round(box.y + box.height - 24), { button: 'right' });
+        await page.getByRole('menu', { name: 'เมนูของผัง' }).getByRole('menuitemcheckbox', { name: item, exact: true }).click();
+        await page.waitForTimeout(900);
+      }
+      const r = await measure();
+      const where = `${step.join('/')} ${mode}`;
+      expect(r.labelled, where).toBeGreaterThan(10);
+      expect(r.labelOverlaps, `${where}: ตัวเลขทับกัน`).toBe(0);
+      expect(r.onNodes, `${where}: ตัวเลขทับวงกลมของจุด`).toBe(0);
+      expect(r.visible + r.hidden, where).toBe(r.labelled);
+      // จำนวนที่ซ่อนตรงกับข้อความแจ้งในแผงเครื่องมือ
+      const notice = page.locator('.net-hidden-labels');
+      if (r.hidden) await expect(notice, where).toContainText(`ซ่อนตัวเลข ${r.hidden} เส้น`);
+      else await expect(notice, where).toHaveCount(0);
+      totalHidden += r.hidden;
+      totalMoved += r.moved;
+      if (step[0] === 'Organization') {
+        // ป้ายของสายแม่→ลูกอยู่เหนือบัญชีลูก (คอลัมน์ของลูกเอง) ไม่ใช่กลางเส้นแนวนอนร่วม
+        const org = await page.evaluate((sel) => {
+          const cy = (document.querySelector(sel) as any).__cy;
+          const L = { includeNodes: false, includeEdges: false, includeLabels: true, includeOverlays: false };
+          return cy.edges('.org.elabel').not('.org-up, .org-flat, .lbl-hidden').map((c: any) => {
+            const bb = c.boundingBox(L);
+            const t = c.target();
+            return { dx: Math.abs((bb.x1 + bb.x2) / 2 - t.position('x')), above: bb.y2 <= t.position('y') - t.outerHeight() / 2 };
+          });
+        }, HOST);
+        expect(org.length).toBeGreaterThan(5);
+        expect(org.every((o: { dx: number; above: boolean }) => o.dx < 1.5 && o.above)).toBe(true);
+        if (mode === 'plain') {
+          expect(r.hidden, 'Organization แบบปกติในคดีตัวอย่างต้องแสดงตัวเลขครบทุกเส้น').toBe(0);
+          await page.screenshot({ path: shot('labels-org-plain') });
+        }
+      }
+    }
+  }
+  expect(totalHidden).toBeGreaterThan(0);
+  expect(totalMoved).toBeGreaterThan(0);
+  await page.screenshot({ path: shot('labels-packed-card') });
+
+  // ชี้ที่เส้นที่ถูกซ่อนตัวเลข → แสดงชั่วคราว; เลื่อนออก → ซ่อนเหมือนเดิม
+  const target = await page.evaluate((sel) => {
+    const host = document.querySelector(sel) as any;
+    const cy = host.__cy;
+    const r = host.getBoundingClientRect();
+    const pan = cy.pan();
+    const z = cy.zoom();
+    for (const e of cy.edges('.lbl-hidden').not('.elabel').toArray()) {
+      for (const f of [0.5, 0.4, 0.6, 0.3, 0.7]) {
+        const s = e.sourceEndpoint();
+        const t = e.targetEndpoint();
+        const m = { x: s.x + (t.x - s.x) * f, y: s.y + (t.y - s.y) * f };
+        const x = Math.round(r.left + m.x * z + pan.x);
+        const y = Math.round(r.top + m.y * z + pan.y);
+        const hit = document.elementFromPoint(x, y);
+        if (!hit || !host.contains(hit)) continue;
+        const near = cy.renderer().findNearestElements((x - r.left - pan.x) / z, (y - r.top - pan.y) / z, true, false);
+        if (near[0] && near[0].id() === e.id()) return { id: e.id() as string, x, y };
+      }
+    }
+    return null;
+  }, HOST);
+  expect(target, 'ต้องมีเส้นที่ถูกซ่อนตัวเลขที่ชี้ถึงได้').not.toBeNull();
+  const labelOf = () => page.evaluate(([sel, id]) => {
+    const cy = (document.querySelector(sel!) as any).__cy;
+    const e = cy.getElementById(id);
+    const bb = e.boundingBox({ includeNodes: false, includeEdges: false, includeLabels: true, includeOverlays: false });
+    return { hidden: e.hasClass('lbl-hidden'), peek: e.hasClass('lbl-peek'), w: bb.w };
+  }, [HOST, target!.id]);
+  await page.mouse.move(target!.x, target!.y);
+  await expect.poll(labelOf).toMatchObject({ hidden: false, peek: true });
+  expect((await labelOf()).w).toBeGreaterThan(20);
+  await page.screenshot({ path: shot('labels-peek') });
+  await page.mouse.move(box.x + 5, box.y + box.height - 5);
+  await expect.poll(labelOf).toMatchObject({ hidden: true, peek: false });
+
+  // รายงาน (Packed + การ์ด ที่จัดไว้) บอกจำนวนเส้นที่ไม่แสดงตัวเลข
+  await page.goto('/#/report');
+  await expect(page.locator('img[alt="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี"]')).toBeVisible({ timeout: 30_000 });
+  await expect(caption(page)).toContainText('รูปแบบ Packed');
+  await expect(caption(page)).toContainText(/ไม่แสดงตัวเลขบนเส้น \d+ เส้นที่ไม่มีที่ว่าง/);
+
+  expect(errors.filter((e) => !/favicon|manifest/i.test(e))).toEqual([]);
+});
