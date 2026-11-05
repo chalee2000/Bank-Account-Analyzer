@@ -593,7 +593,7 @@ function NodeMenuPopup({ menu, onClose, onEdit }: { menu: NodeMenu; onClose: () 
   return (
     <FloatingMenu x={menu.x} y={menu.y} label={'เมนูของ ' + labelOf(menu.id)} onClose={onClose}>
       <div class="ctx-head ellipsis" title={labelOf(menu.id)}>{labelOf(menu.id)}</div>
-      <button role="menuitem" onClick={() => onEdit(menu.id)}><Icon name="user" size={16} />{a.label || photo ? 'แก้ข้อมูลบุคคล (เลขบัตร ชื่อ-นามสกุล ที่อยู่ รูป)…' : 'ใส่ข้อมูลบุคคล (เลขบัตร ชื่อ-นามสกุล ที่อยู่ รูป)…'}</button>
+      <button role="menuitem" onClick={() => onEdit(menu.id)}><Icon name="user" size={16} />{a.label || photo ? 'แก้ข้อมูลบุคคล (เลขบัตร ชื่อ-นามสกุล ที่อยู่ เบอร์โทร รูป)…' : 'ใส่ข้อมูลบุคคล (เลขบัตร ชื่อ-นามสกุล ที่อยู่ เบอร์โทร รูป)…'}</button>
       <button role="menuitem" onClick={act(() => openInspector({ kind: 'account', id: menu.id }))}><Icon name="info" size={16} />รายละเอียดบัญชี</button>
       <button role="menuitem" onClick={act(() => go('/transactions', { acc: menu.id }))}><Icon name="list" size={16} />ธุรกรรมของบัญชีนี้</button>
       {photo && (

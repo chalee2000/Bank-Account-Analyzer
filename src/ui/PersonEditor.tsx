@@ -2,12 +2,12 @@
 import { useRef, useState } from 'preact/hooks';
 import { accounts, cs, notify, setAccountNote } from '../state';
 import { bankDisplay, formatAccountNumber } from '../core/normalize';
-import { draftOf, geoHint, idCardHint, noteOf, type PersonDraft } from '../core/person';
+import { draftOf, geoHint, idCardHint, noteOf, phoneHint, type PersonDraft } from '../core/person';
 import { imageFileToAvatar } from './avatar';
 import { Field, Modal } from './common';
 import { Icon } from './icons';
 
-export { draftOf, geoHint, idCardHint, noteOf, type PersonDraft } from '../core/person';
+export { draftOf, geoHint, idCardHint, noteOf, phoneHint, type PersonDraft } from '../core/person';
 
 const Hint = ({ h }: { h: { text: string; warn: boolean } | null }) =>
   h ? <span class="tiny" style={{ color: h.warn ? 'var(--warning)' : 'var(--text-3)' }} role={h.warn ? 'alert' : undefined}>{h.text}</span> : null;
@@ -95,6 +95,15 @@ export function PersonFields(props: { draft: PersonDraft; onChange: (d: PersonDr
         />
       </Field>
       <label class="field">
+        <span>เบอร์โทร</span>
+        <input
+          class="input" type="tel" value={draft.phone} placeholder="เช่น 081-234-5678 (หลายเบอร์คั่นด้วย ,)" autocomplete="off"
+          onInput={(e) => props.onChange({ ...draft, phone: (e.target as HTMLInputElement).value })}
+          onBlur={() => props.onCommit?.(draft)}
+        />
+        <Hint h={phoneHint(draft.phone)} />
+      </label>
+      <label class="field">
         <span>พิกัดที่อยู่ (ละติจูด, ลองจิจูด)</span>
         <input
           class="input" value={draft.geo} placeholder="เช่น 13.756331, 100.501765 หรือวางลิงก์แผนที่ที่มีพิกัด" autocomplete="off"
@@ -110,7 +119,7 @@ export function PersonFields(props: { draft: PersonDraft; onChange: (d: PersonDr
           onBlur={() => props.onCommit?.(draft)}
         />
       </Field>
-      <div class="tiny muted">เลขบัตร ชื่อ ที่อยู่ พิกัด และรูปเป็นข้อมูลที่ผู้สืบสวนบันทึกจากหลักฐานอื่น ระบบไม่ได้ยืนยันว่าเป็นเจ้าของหรือผู้ใช้บัญชีจริง — ควรระบุที่มาไว้เสมอ · เก็บในเครื่องนี้และในไฟล์คดีเข้ารหัสเท่านั้น</div>
+      <div class="tiny muted">เลขบัตร ชื่อ ที่อยู่ เบอร์โทร พิกัด และรูปเป็นข้อมูลที่ผู้สืบสวนบันทึกจากหลักฐานอื่น ระบบไม่ได้ยืนยันว่าเป็นเจ้าของหรือผู้ใช้บัญชีจริง — ควรระบุที่มาไว้เสมอ · เก็บในเครื่องนี้และในไฟล์คดีเข้ารหัสเท่านั้น</div>
     </div>
   );
 }

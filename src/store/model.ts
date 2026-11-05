@@ -99,6 +99,8 @@ export interface AccountNote {
   label?: string;
   /** ที่อยู่ */
   address?: string;
+  /** เบอร์โทร (หลายเบอร์คั่นด้วย ", ") */
+  phone?: string;
   /** พิกัดที่อยู่ "ละติจูด, ลองจิจูด" */
   geo?: string;
   note?: string;

@@ -84,15 +84,17 @@ test('คลิกขวาที่จุดบัญชี → ตั้งช
   const menu = page.locator('.ctx-menu');
   await expect(menu).toBeVisible();
   await page.screenshot({ path: shot('person-menu') });
-  await menu.getByRole('menuitem', { name: /ใส่ข้อมูลบุคคล \(เลขบัตร ชื่อ-นามสกุล ที่อยู่ รูป\)/ }).click();
+  await menu.getByRole('menuitem', { name: /ใส่ข้อมูลบุคคล \(เลขบัตร ชื่อ-นามสกุล ที่อยู่ เบอร์โทร รูป\)/ }).click();
   const modal = page.getByRole('dialog', { name: 'ข้อมูลบุคคล' });
   await expect(modal).toBeVisible();
-  // ลำดับช่อง: เลขบัตรอยู่บนชื่อ, ที่อยู่ใต้ชื่อ, พิกัดใต้ที่อยู่
+  // ลำดับช่อง: เลขบัตรอยู่บนชื่อ, ที่อยู่ใต้ชื่อ, เบอร์โทรใต้ที่อยู่, แล้วพิกัด
   const labels = await modal.locator('label.field > span:first-child').allTextContents();
   const at = (t: string) => labels.findIndex((l) => l.startsWith(t));
   expect(at('เลขประจำตัวประชาชน')).toBeLessThan(at('ชื่อ-นามสกุล'));
   expect(at('ชื่อ-นามสกุล')).toBeLessThan(at('ที่อยู่'));
-  expect(at('ที่อยู่')).toBeLessThan(at('พิกัดที่อยู่'));
+  expect(at('ที่อยู่')).toBe(at('ชื่อ-นามสกุล') + 1);
+  expect(at('เบอร์โทร')).toBe(at('ที่อยู่') + 1);
+  expect(at('เบอร์โทร')).toBeLessThan(at('พิกัดที่อยู่'));
   // เลขบัตร (สมมติ) หลักตรวจสอบผิด → เตือน; แก้ให้ถูก → ยืนยันรูปแบบ
   const idBox = modal.getByLabel('เลขประจำตัวประชาชน');
   await idBox.fill('1234567890123');
@@ -101,6 +103,8 @@ test('คลิกขวาที่จุดบัญชี → ตั้งช
   await expect(modal.getByText('รูปแบบถูกต้อง: 1-2345-67890-12-1')).toBeVisible();
   await modal.getByPlaceholder('เช่น นายสมมติ ตัวอย่าง').fill(NAME);
   await modal.getByLabel('ที่อยู่', { exact: true }).fill(ADDRESS);
+  await modal.getByLabel('เบอร์โทร').fill('0812345678 / +66 2 123 4567');
+  await expect(modal.getByText('2 เบอร์: 081-234-5678, 02-123-4567')).toBeVisible();
   await modal.getByLabel('พิกัดที่อยู่ (ละติจูด, ลองจิจูด)').fill('https://maps.example/?q=13.7563,100.5018');
   await expect(modal.getByText('ละติจูด 13.756300 · ลองจิจูด 100.501800')).toBeVisible();
   const png = await page.evaluate(() => {
@@ -142,6 +146,7 @@ test('คลิกขวาที่จุดบัญชี → ตั้งช
   await expect(panel.getByText(NAME, { exact: true }).first()).toBeVisible();
   await expect(panel.getByLabel('เลขประจำตัวประชาชน')).toHaveValue('1-2345-67890-12-1');
   await expect(panel.getByLabel('ที่อยู่', { exact: true })).toHaveValue(ADDRESS);
+  await expect(panel.getByLabel('เบอร์โทร')).toHaveValue('081-234-5678, 02-123-4567');
   await expect(panel.getByLabel('พิกัดที่อยู่ (ละติจูด, ลองจิจูด)')).toHaveValue('13.756300, 100.501800');
   await page.screenshot({ path: shot('person-panel') });
 
