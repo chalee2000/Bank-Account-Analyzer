@@ -373,3 +373,67 @@ test('ดับเบิลคลิกพื้นที่ว่าง → ผ
 
   expect(errors.filter((x) => !/favicon|manifest/i.test(x))).toEqual([]);
 });
+
+test('ซูมด้วยลูกกลิ้ง: หนึ่งคลิกซูมชัดเจนรอบตำแหน่งเมาส์ ปรับความไวได้และจำไว้ ลูกกลิ้งบนแผงไม่ซูมผัง', async ({ page }) => {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'error') errors.push(m.text());
+    if (m.type() === 'warning') warnings.push(m.text());
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'ทดลองด้วยข้อมูลสมมติ' }).click();
+  await expect(page.getByText('ภาพรวมคดี')).toBeVisible();
+  await page.goto('/#/network');
+  await waitGraph(page);
+  await expect(page.getByRole('button', { name: 'ปกติ', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  const view = () => page.evaluate((sel) => {
+    const host = document.querySelector(sel) as any;
+    const cy = host.__cy;
+    const r = host.getBoundingClientRect();
+    return { zoom: cy.zoom() as number, pan: { ...cy.pan() } as P, left: r.left as number, top: r.top as number };
+  }, HOST);
+  /** ซูมหนึ่งคลิกที่จุดว่าง คืนอัตราส่วนซูม และระยะที่จุดของผังใต้เมาส์เลื่อนไป (พิกเซลบนจอ) */
+  const oneNotch = async (deltaY: number) => {
+    await settleView(page);
+    const s = (await blankSpot(page))!;
+    await page.mouse.move(s.x, s.y);
+    const a = await view();
+    const model = { x: (s.x - a.left - a.pan.x) / a.zoom, y: (s.y - a.top - a.pan.y) / a.zoom };
+    await page.mouse.wheel(0, deltaY);
+    await expect.poll(async () => (await view()).zoom).not.toBe(a.zoom);
+    const b = await view();
+    const drift = Math.hypot(model.x * b.zoom + b.pan.x + b.left - s.x, model.y * b.zoom + b.pan.y + b.top - s.y);
+    return { ratio: b.zoom / a.zoom, drift };
+  };
+
+  const down = await oneNotch(100);
+  expect(down.ratio).toBeGreaterThan(0.75);
+  expect(down.ratio).toBeLessThan(0.9);
+  expect(down.drift).toBeLessThan(2);
+  const up = await oneNotch(-100);
+  expect(up.ratio).toBeGreaterThan(1.1);
+  expect(up.drift).toBeLessThan(2);
+
+  // เร็ว: ซูมต่อคลิกมากกว่าปกติ และจำไว้หลังรีโหลด
+  await page.getByRole('button', { name: 'เร็ว', exact: true }).click();
+  const fast = await oneNotch(100);
+  expect(fast.ratio).toBeLessThan(down.ratio - 0.05);
+  await page.reload();
+  await waitGraph(page);
+  await expect(page.getByRole('button', { name: 'เร็ว', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  // ลูกกลิ้งบนแผงเครื่องมือ → ไม่ซูมผัง
+  const before = (await view()).zoom;
+  const tools = (await page.locator('.net-tools').boundingBox())!;
+  await page.mouse.move(tools.x + tools.width / 2, tools.y + tools.height / 2);
+  await page.mouse.wheel(0, 100);
+  await page.waitForTimeout(300);
+  expect((await view()).zoom).toBe(before);
+
+  expect(warnings.filter((w) => /wheel sensitivity/i.test(w))).toEqual([]);
+  expect(errors.filter((x) => !/favicon|manifest/i.test(x))).toEqual([]);
+});

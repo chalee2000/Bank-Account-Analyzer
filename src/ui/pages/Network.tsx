@@ -7,6 +7,7 @@ import {
   autoMinAmount, buildElements, fitInView, graphSignature, hashSignature, livePalette, loadCytoscape, makeStyle, netOptionsFromView,
   fitFlowView, flowDirOf, flowRefresh, freshPlan, isAlgoMode, isFlowMode, planLayout, runLayoutPlan, snapshotPositions, syncNotes, updateElementsInPlace, type Insets, type LayoutPlan, type LegendItem,
 } from '../network/graph';
+import { loadZoomSpeed, saveZoomSpeed, wheelZoomFactor, ZOOM_SPEED_LABEL, type ZoomSpeed } from '../network/zoom';
 import { Empty, Field, Modal, Seg, saveBlob } from '../common';
 import { Icon } from '../icons';
 import { PersonModal } from '../PersonEditor';
@@ -39,6 +40,22 @@ export function NetworkPage() {
   const st = cs.value!;
   const params = route.value.params;
   const host = useRef<HTMLDivElement>(null);
+  /** ความไวการซูมด้วยลูกกลิ้ง (จำในเบราว์เซอร์นี้) */
+  const [zoomSpeed, setZoomSpeedState] = useState<ZoomSpeed>(loadZoomSpeed);
+  const zoomSpeedRef = useRef(zoomSpeed);
+  zoomSpeedRef.current = zoomSpeed;
+  const setZoomSpeed = (v: ZoomSpeed) => { setZoomSpeedState(v); saveZoomSpeed(v); };
+  /** ลูกกลิ้งบนผัง → ซูมรอบตำแหน่งเมาส์ (ดักก่อนถึง Cytoscape); ลูกกลิ้งบนเมนู/แผงเครื่องมือเลื่อนตามปกติ */
+  const onWheelCapture = (e: WheelEvent) => {
+    const cy = cyRef.current;
+    const el = host.current;
+    if (!cy || !el || !el.contains(e.target as Node) || !cy.userZoomingEnabled()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const r = el.getBoundingClientRect();
+    const level = Math.min(cy.maxZoom(), Math.max(cy.minZoom(), cy.zoom() * wheelZoomFactor(e, zoomSpeedRef.current)));
+    cy.zoom({ level, renderedPosition: { x: e.clientX - r.left, y: e.clientY - r.top } });
+  };
   const toolsRef = useRef<HTMLDivElement>(null);
   const legendRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
@@ -162,7 +179,8 @@ export function NetworkPage() {
     let cy: Core | null = null;
     void loadCytoscape().then((cytoscape) => {
       if (disposed || !host.current) return;
-      cy = cytoscape({ container: host.current, elements: [], style: makeStyle(livePalette()), wheelSensitivity: 0.25, minZoom: 0.05, maxZoom: 4 });
+      // ลูกกลิ้งจัดการเองใน onWheelCapture (ไวกว่าและแยกเมาส์/ทัชแพดได้) — ไม่ตั้ง wheelSensitivity ของ Cytoscape
+      cy = cytoscape({ container: host.current, elements: [], style: makeStyle(livePalette()), minZoom: 0.05, maxZoom: 4 });
       cyRef.current = cy;
       (host.current as HTMLDivElement & { __cy?: Core }).__cy = cy; // ให้ e2e หาตำแหน่งจุดบนผังได้
       // คลิกขวา (เมาส์) หรือกดค้าง (จอสัมผัส): จุดบัญชี → เมนูตั้งชื่อ/ใส่รูป; พื้นที่ว่าง/เส้น → เมนูผัง; โน้ต → แก้/ลบ
@@ -398,7 +416,7 @@ export function NetworkPage() {
   return (
     <div class="net-wrap">
       {/* คลิกขวาที่ใดในพื้นที่ผังก็ไม่ให้เมนูของเบราว์เซอร์ขึ้น (ยกเว้นช่องกรอกข้อความ ให้ยังคัดลอก/วางได้) */}
-      <div class="net-canvas" onContextMenu={(e) => { if (!(e.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) e.preventDefault(); }}>
+      <div class="net-canvas" onWheelCapture={onWheelCapture} onContextMenu={(e) => { if (!(e.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')) e.preventDefault(); }}>
         <div ref={host} style="position:absolute;inset:0" role="img" aria-label="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี" onContextMenu={(e) => e.preventDefault()} />
         {menu && <NodeMenuPopup menu={menu} onClose={() => setMenu(null)} onEdit={(id) => { setMenu(null); setPersonId(id); }} />}
         {canvasMenu && (
@@ -456,6 +474,9 @@ export function NetworkPage() {
                   </div>
                 )}
                 <div class="tiny muted">{LAYOUTS.find((l) => l.value === layoutMode)?.hint}</div>
+              </Field>
+              <Field group label="ความไวการซูม (ลูกกลิ้งเมาส์/ทัชแพด)">
+                <Seg value={zoomSpeed} onChange={setZoomSpeed} options={(['slow', 'normal', 'fast'] as ZoomSpeed[]).map((v) => ({ value: v, label: ZOOM_SPEED_LABEL[v] }))} />
               </Field>
               <Field group label="ระบายสีตาม">
                 <Seg value={colorBy} onChange={(v) => setOpt({ colorBy: v })} options={[{ value: 'role', label: 'บทบาท' }, { value: 'bank', label: 'ธนาคาร' }, { value: 'community', label: 'ชุมชน' }]} />
