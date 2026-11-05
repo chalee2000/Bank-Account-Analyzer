@@ -120,7 +120,7 @@ test('รูปแบบวงซ้อน + ลากจุดแล้วร�
   expect(errors.filter((e) => !/favicon|manifest/i.test(e))).toEqual([]);
 });
 
-test('ผังไหลเงิน: เส้นมุมฉาก 3 ส่วน ป้ายแคปซูลมีลูกศร ลากแล้วจำ และรายงานบอกรูปแบบ', async ({ page }) => {
+test('ผังไหลเงินแนวตั้ง: เส้นมุมฉาก 3 ส่วน ป้ายแคปซูลมีลูกศร ลากแล้วจำ และรายงานบอกรูปแบบ', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -134,6 +134,10 @@ test('ผังไหลเงิน: เส้นมุมฉาก 3 ส่ว
   const flow = page.getByRole('button', { name: 'ผังไหลเงิน', exact: true });
   await flow.click();
   await expect(flow).toHaveAttribute('aria-pressed', 'true');
+  // ค่าเริ่มต้นของผังไหลเงินคือแนวนอน — กรณีนี้ทดสอบแนวตั้ง
+  await expect(page.getByRole('button', { name: 'แนวนอน', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'แนวตั้ง', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'แนวตั้ง', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.waitForTimeout(900);
 
   const info = await page.evaluate((sel) => {
@@ -229,7 +233,8 @@ test('ผังไหลเงิน: เส้นมุมฉาก 3 ส่ว
   const menu = page.getByRole('menu', { name: 'เมนูของผัง' });
   await expect(menu).toBeVisible();
   await menu.getByRole('menuitem', { name: /^จัดวาง/ }).click();
-  await expect(menu.getByRole('menuitemradio', { name: 'ผังไหลเงิน: เส้นมุมฉาก' })).toHaveAttribute('aria-checked', 'true');
+  await expect(menu.getByRole('menuitemradio', { name: 'ผังไหลเงิน: แนวตั้ง' })).toHaveAttribute('aria-checked', 'true');
+  await expect(menu.getByRole('menuitemradio', { name: 'ผังไหลเงิน: แนวนอน' })).toHaveAttribute('aria-checked', 'false');
   await menu.getByRole('menuitemcheckbox', { name: 'แสดงรายละเอียดเส้นเงินทุกเส้น แบบการ์ด' }).click();
   await expect.poll(async () => (await carriers()).card).toBeGreaterThan(5);
   cr = await carriers();
@@ -274,8 +279,94 @@ test('ผังไหลเงิน: เส้นมุมฉาก 3 ส่ว
   // รายงาน: ภาพผังใช้ผังไหลเงิน และคำบรรยายรูปบอกรูปแบบ
   await page.goto('/#/report');
   await expect(page.locator('img[alt="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี"]')).toBeVisible({ timeout: 30_000 });
-  await expect(caption(page)).toContainText('รูปแบบผังไหลเงิน');
+  await expect(caption(page)).toContainText('รูปแบบผังไหลเงินแนวตั้ง');
   await expect(caption(page)).toContainText('จัดตำแหน่งตามที่ผู้สืบสวนจัดไว้');
+
+  expect(errors.filter((e) => !/favicon|manifest/i.test(e))).toEqual([]);
+});
+
+test('ผังไหลเงินแนวนอน (ค่าเริ่มต้น): ผู้โอนแถวบน เลนแนวนอน ผู้รับแถวล่าง เส้นรูปตัว L ตามแกน และตำแหน่งแยกจากแนวตั้ง', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'ทดลองด้วยข้อมูลสมมติ' }).click();
+  await expect(page.getByText('ภาพรวมคดี')).toBeVisible();
+  await page.goto('/#/network');
+  await waitGraph(page);
+  await page.getByRole('button', { name: 'ผังไหลเงิน', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'แนวนอน', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.waitForTimeout(900);
+
+  const info = await page.evaluate((sel) => {
+    const cy = (document.querySelector(sel) as any).__cy;
+    const ys = (c: string) => cy.nodes(`[fcol = "${c}"]`).map((n: any) => n.position('y')) as number[];
+    const xs = cy.nodes().not('.note').map((n: any) => n.position('x')) as number[];
+    const es = cy.edges('.flow').not('.elabel').map((e: any) => ({
+      x: e.hasClass('flow-x'), h: e.hasClass('flow-h'), s: { ...e.source().position() }, t: { ...e.target().position() },
+      seg: e.segmentPoints() as { x: number; y: number }[], pill: String(e.data('pillText')),
+    }));
+    return { src: ys('src'), hub: ys('hub'), sink: ys('sink'), xs, es, owners: cy.nodes('.owner').map((n: any) => n.data('fcol')), carriers: cy.edges('.elabel').length };
+  }, HOST);
+  // 3 แถว: ผู้โอนบน < เลนของบัญชีในขั้นบันได (ไม่ซ้ำกัน) < ผู้รับล่าง; ทุกจุดคนละคอลัมน์
+  expect(info.owners.every((c: string) => c === 'hub')).toBe(true);
+  expect(Math.max(...info.src)).toBeLessThan(Math.min(...info.hub));
+  expect(Math.max(...info.hub)).toBeLessThan(Math.min(...info.sink));
+  expect(new Set(info.hub.map(Math.round)).size).toBe(info.hub.length);
+  expect(new Set(info.xs.map(Math.round)).size).toBe(info.xs.length);
+  // เส้นรูปตัว L ตามแกนนอน: เส้นจากเลน (flow-v) ไปตามเลนแนวนอนก่อน แล้วลงเข้าปลายทาง (มุมที่ x ปลายทาง, y ต้นทาง);
+  // เส้นจากแถวบน (flow-h) ลงแนวดิ่งก่อน แล้วเข้าเลนของปลายทาง (มุมที่ x ต้นทาง, y ปลายทาง)
+  expect(info.es.length).toBeGreaterThan(5);
+  for (const e of info.es) {
+    expect(e.x).toBe(true);
+    expect(e.seg.length).toBe(1);
+    const c = e.seg[0]!;
+    if (e.h) { expect(c.x).toBeCloseTo(e.s.x, 0); expect(c.y).toBeCloseTo(e.t.y, 0); }
+    else { expect(c.x).toBeCloseTo(e.t.x, 0); expect(c.y).toBeCloseTo(e.s.y, 0); }
+    expect(e.pill).toMatch(/^฿[\d,]+ \([\d,]+×\) [▸◂▴▾]$/);
+  }
+  expect(info.carriers).toBeGreaterThan(5); // ป้ายเปิดให้เองและอยู่บนเส้นเสมอ
+  await page.screenshot({ path: shot('layout-flow-horizontal') });
+
+  // ลากผู้รับในแนวนอน → สลับเป็นแนวตั้งแล้วกลับมา → ตำแหน่งที่ลากในแนวนอนยังอยู่ (เก็บแยกตามทิศ)
+  await page.getByRole('button', { name: 'พอดีจอ', exact: true }).click();
+  await page.waitForTimeout(400);
+  const t = await page.evaluate((sel) => {
+    const host = document.querySelector(sel) as any;
+    const r = host.getBoundingClientRect();
+    for (const n of host.__cy.nodes('[fcol = "sink"]').toArray()) {
+      const p = n.renderedPosition();
+      const x = r.left + p.x;
+      const y = r.top + p.y;
+      const hit = document.elementFromPoint(x, y);
+      const dest = document.elementFromPoint(x + 30, y - 40);
+      if (hit && host.contains(hit) && dest && host.contains(dest)) return { id: n.id() as string, x, y };
+    }
+    return null;
+  }, HOST);
+  expect(t, 'ต้องมีผู้รับที่ลากได้').not.toBeNull();
+  await page.mouse.move(t!.x, t!.y);
+  await page.mouse.down();
+  await page.mouse.move(t!.x + 30, t!.y - 40, { steps: 8 });
+  await page.mouse.up();
+  const dragged = await nodePos(page, t!.id);
+  await page.waitForTimeout(600);
+  await page.getByRole('button', { name: 'แนวตั้ง', exact: true }).click();
+  await page.waitForTimeout(900);
+  const vertical = await nodePos(page, t!.id);
+  expect(Math.hypot(vertical.x - dragged.x, vertical.y - dragged.y)).toBeGreaterThan(20);
+  await page.getByRole('button', { name: 'แนวนอน', exact: true }).click();
+  await page.waitForTimeout(900);
+  const back = await nodePos(page, t!.id);
+  expect(back.x).toBeCloseTo(dragged.x, 0);
+  expect(back.y).toBeCloseTo(dragged.y, 0);
+
+  // รายงานบอกว่าเป็นผังไหลเงินแนวนอน
+  await page.waitForTimeout(400);
+  await page.goto('/#/report');
+  await expect(page.locator('img[alt="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี"]')).toBeVisible({ timeout: 30_000 });
+  await expect(caption(page)).toContainText('รูปแบบผังไหลเงินแนวนอน');
 
   expect(errors.filter((e) => !/favicon|manifest/i.test(e))).toEqual([]);
 });

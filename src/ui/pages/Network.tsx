@@ -5,7 +5,7 @@ import { accounts, analysis, cs, derived, go, labelOf, notify, openInspector, pa
 import { fmtBaht, fmtInt } from '../../core/thai';
 import {
   autoMinAmount, buildElements, fitInView, graphSignature, hashSignature, livePalette, loadCytoscape, makeStyle, netOptionsFromView, ownerRing,
-  fitFlowView, flowRefresh, planLayout, runLayoutPlan, snapshotPositions, syncNotes, updateElementsInPlace, type Insets, type LayoutPlan, type LegendItem,
+  fitFlowView, flowDirOf, flowRefresh, isFlowMode, planLayout, runLayoutPlan, snapshotPositions, syncNotes, updateElementsInPlace, type Insets, type LayoutPlan, type LegendItem,
 } from '../network/graph';
 import { Empty, Field, Modal, Seg, saveBlob } from '../common';
 import { Icon } from '../icons';
@@ -25,7 +25,8 @@ const MIN_OPTIONS = [0, 1_000, 10_000, 50_000, 100_000, 500_000, 1_000_000];
 const LAYOUTS: { value: LayoutMode; label: string; short: string; hint: string }[] = [
   { value: 'auto', label: 'อัตโนมัติ', short: 'อัตโนมัติ', hint: 'จัดตามแรงดึงดูด เจ้าของ Statement วางบนวงรี' },
   { value: 'concentric', label: 'วงซ้อน: เจ้าของอยู่กลาง', short: 'วงซ้อน', hint: 'เจ้าของ Statement วงใน บัญชีร่วมวงถัดมา คู่บัญชีวงนอก' },
-  { value: 'flow', label: 'ผังไหลเงิน: เส้นมุมฉาก', short: 'ผังไหลเงิน', hint: 'ผู้โอนเข้าซ้าย → บัญชีเจ้าของ/ทางผ่านเป็นขั้นบันได → ผู้รับขวา เส้นหักมุมฉาก' },
+  { value: 'flowh', label: 'ผังไหลเงิน: แนวนอน', short: 'ผังไหลเงิน', hint: 'ผู้โอนเข้าแถวบน → บัญชีเจ้าของ/ทางผ่านเป็นขั้นบันได → ผู้รับแถวล่าง เส้นหักมุมฉาก' },
+  { value: 'flow', label: 'ผังไหลเงิน: แนวตั้ง', short: 'ผังไหลเงิน', hint: 'ผู้โอนเข้าซ้าย → บัญชีเจ้าของ/ทางผ่านเป็นขั้นบันได → ผู้รับขวา เส้นหักมุมฉาก' },
 ];
 
 export function NetworkPage() {
@@ -41,6 +42,8 @@ export function NetworkPage() {
   // ตัวกรอง + รูปแบบการจัดผัง: เริ่มจากที่บันทึกในคดี (เปิดหน้าใหม่ได้มุมมองเดิม และรายงานใช้มุมมองเดียวกัน)
   const [opt, setOptState] = useState<NetworkViewOptions>(() => ({ ...DEFAULT_NETWORK_OPTIONS, ...st.networkView?.options }));
   const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => st.networkView?.layout ?? 'auto');
+  /** ทิศล่าสุดของผังไหลเงิน — ปุ่ม "ผังไหลเงิน" กลับไปใช้ทิศนี้ (ค่าเริ่มต้นแนวนอน) */
+  const lastFlow = useRef<LayoutMode>(isFlowMode(layoutMode) ? layoutMode : 'flowh');
   const setOpt = (p: Partial<NetworkViewOptions>) => setOptState((o) => ({ ...o, ...p }));
   const { scope, topPerOwner, colorBy, showCash, showManual } = opt;
   const from = opt.from ?? '';
@@ -75,13 +78,14 @@ export function NetworkPage() {
 
   const built = useMemo(() => {
     if (!res || !d) return null;
-    return buildElements(d, res, st, { ...netOptionsFromView(opt, res), focus: focus ? focus.split(',').filter(Boolean) : undefined, flow: layoutMode === 'flow' }, livePalette());
+    return buildElements(d, res, st, { ...netOptionsFromView(opt, res), focus: focus ? focus.split(',').filter(Boolean) : undefined, flow: isFlowMode(layoutMode), flowDir: flowDirOf(layoutMode) }, livePalette());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [res, d, st.manualNodes, st.manualLinks, st.accountNotes, opt, focus, theme.value, layoutMode]);
   /** เลือกรูปแบบการจัดผัง — ผังไหลเงินเปิดป้ายบนเส้นให้ (ถ้ายังปิดอยู่) ให้เห็นยอด/จำนวนครั้ง/ทิศทางแบบผังไหลเงินทั่วไป */
   const chooseLayout = (m: LayoutMode) => {
     setLayoutMode(m);
-    if (m === 'flow' && (opt.edgeLabels ?? 'off') === 'off') setOpt({ edgeLabels: 'plain' });
+    if (isFlowMode(m)) lastFlow.current = m;
+    if (isFlowMode(m) && !isFlowMode(layoutMode) && (opt.edgeLabels ?? 'off') === 'off') setOpt({ edgeLabels: 'plain' });
   };
   const builtHash = useMemo(() => (built ? hashSignature(built.elements) : ''), [built]);
 
@@ -365,7 +369,7 @@ export function NetworkPage() {
   const relayout = () => {
     const cy = cyRef.current;
     if (!cy || !built || built.nodeCount === 0) return;
-    const plan: LayoutPlan = layoutMode === 'concentric' ? { kind: 'concentric' } : layoutMode === 'flow' ? { kind: 'flow' } : { kind: 'fcose', fixed: ownerRing(built.elements), reused: false };
+    const plan: LayoutPlan = layoutMode === 'concentric' ? { kind: 'concentric' } : isFlowMode(layoutMode) ? { kind: 'flow', dir: flowDirOf(layoutMode) } : { kind: 'fcose', fixed: ownerRing(built.elements), reused: false };
     const my = ++runSeq.current;
     void runLayoutPlan(cy, plan, built.nodeCount, true).then(() => {
       if (my !== runSeq.current) return;
@@ -377,7 +381,7 @@ export function NetworkPage() {
   const manualActive = !focus && !!savedPos?.manual && savedPos.sig === builtHash;
   const fit = () => { if (cyRef.current) fitInView(cyRef.current, viewInsets()); };
   /** จัดให้พอดีหลังจัดวาง/เปิด-ปิดแผง: ผังไหลเงินไม่ย่อจนอ่านตัวเลขไม่ได้ */
-  const autoFit = (cy: Core) => (live.current.mode === 'flow' ? fitFlowView(cy, viewInsets()) : fitInView(cy, viewInsets()));
+  const autoFit = (cy: Core) => (isFlowMode(live.current.mode) ? fitFlowView(cy, viewInsets()) : fitInView(cy, viewInsets()));
   autoFitRef.current = autoFit;
   const exportPng = async () => {
     const cy = cyRef.current;
@@ -433,7 +437,19 @@ export function NetworkPage() {
                 <Seg value={scope} onChange={(v) => setOpt({ scope: v })} options={[{ value: 'core', label: 'แกนหลัก' }, { value: 'all', label: 'ทุกบัญชี' }]} />
               </Field>
               <Field group label="รูปแบบการจัดผัง">
-                <Seg value={layoutMode} onChange={chooseLayout} options={LAYOUTS.map((l) => ({ value: l.value, label: l.short }))} />
+                <Seg
+                  value={layoutMode} onChange={chooseLayout}
+                  options={[
+                    { value: 'auto' as LayoutMode, label: 'อัตโนมัติ' }, { value: 'concentric' as LayoutMode, label: 'วงซ้อน' },
+                    { value: isFlowMode(layoutMode) ? layoutMode : lastFlow.current, label: 'ผังไหลเงิน' },
+                  ]}
+                />
+                {isFlowMode(layoutMode) && (
+                  <div class="row small" style="gap:8px;align-items:center">
+                    <span class="secondary">ทิศทาง</span>
+                    <Seg value={layoutMode} onChange={chooseLayout} options={[{ value: 'flowh' as LayoutMode, label: 'แนวนอน' }, { value: 'flow' as LayoutMode, label: 'แนวตั้ง' }]} />
+                  </div>
+                )}
                 <div class="tiny muted">{LAYOUTS.find((l) => l.value === layoutMode)?.hint}</div>
               </Field>
               <Field group label="ระบายสีตาม">

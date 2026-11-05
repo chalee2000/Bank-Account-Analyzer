@@ -5,7 +5,7 @@ import { buildDemoCase } from '../../src/demo';
 import { deriveCase } from '../../src/store/model';
 import { analyze } from '../../src/analysis';
 import {
-  autoMinAmount, badgeTextColor, bankBadge, buildElements, computeFit, concentricPositions, fitInView, FLOW_GEOM, flowBackOffset, flowGlyph, flowRefresh, flowLabelOffset,
+  autoMinAmount, badgeTextColor, bankBadge, buildElements, computeFit, concentricPositions, fitInView, FLOW_GEOM, FLOW_GEOM_H, flowBackOffset, flowGlyph, flowRefresh, flowLabelOffset,
   flowPill, flowPositions, flowRoles, flowRoute, graphSignature, hashSignature, netOptionsFromView,
   noteElements, noteSize, ownerLabelScale, ownerRing, ownerRingRadius, planLayout, PRINT_PALETTE, runLayoutPlan, snapshotPositions, syncNotes,
   updateElementsInPlace, type NetOptions,
@@ -672,7 +672,7 @@ describe('ผังไหลเงิน (เส้นมุมฉาก)', () =
   });
 
   it('runLayoutPlan(flow) วางตาม flowPositions ไม่แตะโน้ต และ flowRefresh ตั้งเส้นทาง/ลูกศร/ระยะป้ายตามตำแหน่ง', async () => {
-    expect(planLayout('flow', g.elements)).toEqual({ kind: 'flow' });
+    expect(planLayout('flow', g.elements)).toEqual({ kind: 'flow', dir: 'v' });
     const saved = { sig: hashSignature(g.elements), nodes: Object.fromEntries(fnodes.map((n) => [n.id, { x: 1, y: 2 }])) };
     expect(planLayout('flow', g.elements, saved).kind).toBe('preset');
     const cy = cytoscape({ headless: true, styleEnabled: false, elements: structuredClone(g.elements) });
@@ -770,5 +770,65 @@ describe('ผังไหลเงิน: ป้ายยอดเงินไ�
     });
     expect(new Set(at).size).toBe(xs.length);
     for (let i = 0; i < xs.length; i++) expect(at[i]).toBeLessThan(xs[i]!.y);
+  });
+});
+
+describe('ผังไหลเงินแนวนอน', () => {
+  const g = build({ flow: true, flowDir: 'h', showCash: true, topPerOwner: 3 });
+  const fnodes = nodes(g).map((n) => ({
+    id: n.data.id as string, role: n.data.role as string, size: n.data.size as number, label: n.data.label as string,
+    fs: n.data.fs as number, tw: n.data.tw as number | undefined, ring: n.data.ring as number | undefined,
+  }));
+  const fedges = edges(g).filter((e) => !String(e.classes ?? '').includes('manual-link'))
+    .map((e) => ({ source: e.data.source as string, target: e.data.target as string, total: e.data.total as number }));
+  const ph = flowPositions(fnodes, fedges, 'h');
+  const pv = flowPositions(fnodes, fedges, 'v');
+  const col = flowRoles(fnodes.map((n) => n.id), fedges, (id) => fnodes.find((n) => n.id === id)?.role === 'owner');
+
+  it('ผู้โอนแถวบน (y = 0) < เลนของขั้นบันได (ไม่ซ้ำ) < ผู้รับแถวล่าง; ลำดับคอลัมน์ตรงกับลำดับแถวของแนวตั้ง', () => {
+    const of = (c: string) => fnodes.filter((n) => col.get(n.id) === c).map((n) => n.id);
+    for (const id of of('src')) expect(ph[id]!.y).toBe(0);
+    const lanes = of('hub').map((id) => ph[id]!.y);
+    expect(new Set(lanes).size).toBe(lanes.length);
+    expect(Math.min(...lanes)).toBeGreaterThan(0);
+    const bottom = ph[of('sink')[0]!]!.y;
+    for (const id of of('sink')) expect(ph[id]!.y).toBe(bottom);
+    expect(bottom).toBeGreaterThan(Math.max(...lanes));
+    const byX = [...fnodes].sort((a, b) => ph[a.id]!.x - ph[b.id]!.x).map((n) => n.id);
+    const byY = [...fnodes].sort((a, b) => pv[a.id]!.y - pv[b.id]!.y).map((n) => n.id);
+    expect(byX).toEqual(byY);
+  });
+
+  it('คอลัมน์ห่างกันไม่น้อยกว่าความกว้างป้ายแคปซูล', () => {
+    const xs = Object.values(ph).map((p) => p.x).sort((a, b) => a - b);
+    for (let i = 1; i < xs.length; i++) expect(xs[i]! - xs[i - 1]!).toBeGreaterThanOrEqual(FLOW_GEOM_H.colMin - 0.01);
+  });
+
+  it('เส้นมีคลาส flow-x และป้ายจุดบอกทิศ (ใช้วางป้ายบน/ล่าง); แนวตั้งไม่มี', () => {
+    expect(edges(g).filter((e) => String(e.classes ?? '').includes('flow ')).every((e) => String(e.classes).includes('flow-x'))).toBe(true);
+    expect(nodes(g).every((n) => n.data.fdir === 'h')).toBe(true);
+    const gv = build({ flow: true, showCash: true, topPerOwner: 3 });
+    expect(edges(gv).some((e) => String(e.classes ?? '').includes('flow-x'))).toBe(false);
+    expect(nodes(gv).every((n) => n.data.fdir === 'v')).toBe(true);
+  });
+
+  it('planLayout แยกทิศ; flowRefresh คิดในกรอบแนวตั้งแล้วหมุนลูกศร', async () => {
+    expect(planLayout('flowh', g.elements)).toEqual({ kind: 'flow', dir: 'h' });
+    expect(planLayout('flow', g.elements)).toEqual({ kind: 'flow', dir: 'v' });
+    const cy = cytoscape({ headless: true, styleEnabled: false, elements: structuredClone(g.elements) });
+    await runLayoutPlan(cy, { kind: 'flow', dir: 'h' }, g.nodeCount);
+    for (const n of fnodes) expect(cy.getElementById(n.id).position()).toEqual(ph[n.id]);
+    const rot: Record<string, string> = { '▸': '▾', '◂': '▴', '▾': '▸', '▴': '◂' };
+    cy.edges('.flow').forEach((e) => {
+      const s = e.source().position();
+      const t = e.target().position();
+      const sv = { x: s.y, y: s.x };
+      const tv = { x: t.y, y: t.x };
+      const back = e.hasClass('flow-back');
+      const g0 = back ? (tv.y < sv.y ? '▴' : '▾') : flowGlyph(sv, tv);
+      expect(String(e.data('pillText')).endsWith(rot[g0]!)).toBe(true);
+      expect(e.hasClass(flowRoute(e.source().data('fcol'), e.target().data('fcol'), sv, tv))).toBe(true);
+    });
+    cy.destroy();
   });
 });

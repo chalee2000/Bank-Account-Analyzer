@@ -43,7 +43,8 @@ export interface CaseState {
   networkView?: NetworkView;
 }
 
-export type LayoutMode = 'auto' | 'concentric' | 'flow';
+/** flow = ผังไหลเงินแนวตั้ง (ผู้โอนซ้าย ผู้รับขวา), flowh = ผังไหลเงินแนวนอน (ผู้โอนบน ผู้รับล่าง) */
+export type LayoutMode = 'auto' | 'concentric' | 'flow' | 'flowh';
 
 export interface NetworkViewOptions {
   scope: 'core' | 'all';
