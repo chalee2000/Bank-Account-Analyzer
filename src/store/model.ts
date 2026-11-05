@@ -44,7 +44,8 @@ export interface CaseState {
 }
 
 /** flow = ผังไหลเงินแนวตั้ง (ผู้โอนซ้าย ผู้รับขวา), flowh = ผังไหลเงินแนวนอน (ผู้โอนบน ผู้รับล่าง) */
-export type LayoutMode = 'auto' | 'concentric' | 'flow' | 'flowh';
+/** peacock/packed/hierarchy/org = รูปแบบแบบเครื่องมือวิเคราะห์ความเชื่อมโยง (i2): ศูนย์กลาง+แฉก / อัดแน่น / ชั้นตามทิศเงิน / แผนผังองค์กร */
+export type LayoutMode = 'auto' | 'concentric' | 'flow' | 'flowh' | 'peacock' | 'packed' | 'hierarchy' | 'org';
 
 export interface NetworkViewOptions {
   scope: 'core' | 'all';

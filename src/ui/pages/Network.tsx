@@ -4,8 +4,8 @@ import type { Core, EventObject } from 'cytoscape';
 import { accounts, analysis, cs, derived, go, labelOf, notify, openInspector, patchCase, route, setAccountNote, theme } from '../../state';
 import { fmtBaht, fmtInt } from '../../core/thai';
 import {
-  autoMinAmount, buildElements, fitInView, graphSignature, hashSignature, livePalette, loadCytoscape, makeStyle, netOptionsFromView, ownerRing,
-  fitFlowView, flowDirOf, flowRefresh, isFlowMode, planLayout, runLayoutPlan, snapshotPositions, syncNotes, updateElementsInPlace, type Insets, type LayoutPlan, type LegendItem,
+  autoMinAmount, buildElements, fitInView, graphSignature, hashSignature, livePalette, loadCytoscape, makeStyle, netOptionsFromView,
+  fitFlowView, flowDirOf, flowRefresh, freshPlan, isAlgoMode, isFlowMode, planLayout, runLayoutPlan, snapshotPositions, syncNotes, updateElementsInPlace, type Insets, type LayoutPlan, type LegendItem,
 } from '../network/graph';
 import { Empty, Field, Modal, Seg, saveBlob } from '../common';
 import { Icon } from '../icons';
@@ -27,6 +27,10 @@ const LAYOUTS: { value: LayoutMode; label: string; short: string; hint: string }
   { value: 'concentric', label: 'วงซ้อน: เจ้าของอยู่กลาง', short: 'วงซ้อน', hint: 'เจ้าของ Statement วงใน บัญชีร่วมวงถัดมา คู่บัญชีวงนอก' },
   { value: 'flowh', label: 'ผังไหลเงิน: แนวนอน', short: 'ผังไหลเงิน', hint: 'ผู้โอนเข้าแถวบน → บัญชีเจ้าของ/ทางผ่านเป็นขั้นบันได → ผู้รับแถวล่าง เส้นหักมุมฉาก' },
   { value: 'flow', label: 'ผังไหลเงิน: แนวตั้ง', short: 'ผังไหลเงิน', hint: 'ผู้โอนเข้าซ้าย → บัญชีเจ้าของ/ทางผ่านเป็นขั้นบันได → ผู้รับขวา เส้นหักมุมฉาก' },
+  { value: 'peacock', label: 'Peacock: ศูนย์กลาง + แฉก', short: 'Peacock', hint: 'บัญชีศูนย์กลางแต่ละรายล้อมด้วยคู่บัญชีที่ติดต่อกับบัญชีนั้นเพียงรายเดียวเป็นแฉก บัญชีที่เชื่อมหลายศูนย์กลางอยู่ตรงกลาง' },
+  { value: 'packed', label: 'Packed: อัดแน่นเป็นกลุ่ม', short: 'Packed', hint: 'บัญชีที่เชื่อมถึงกันอัดเป็นก้อน แต่ละก้อนเรียงชิดกัน ประหยัดพื้นที่ (ไม่ได้จัดตามทิศเงิน)' },
+  { value: 'hierarchy', label: 'Hierarchy: ชั้นตามทิศเงิน', short: 'Hierarchy', hint: 'แบ่งเป็นชั้นตามทิศเงิน: ต้นทางอยู่บน ปลายทางอยู่ล่าง ชั้นละหลายบัญชี' },
+  { value: 'org', label: 'Organization: แผนผังองค์กร', short: 'Organization', hint: 'แผนผังแบบองค์กร เริ่มจากเจ้าของที่ยอดสูงสุด คู่บัญชีเรียงเป็นชั้นลงมาตามการเชื่อมโยง เส้นหักมุมฉาก' },
 ];
 
 export function NetworkPage() {
@@ -78,7 +82,7 @@ export function NetworkPage() {
 
   const built = useMemo(() => {
     if (!res || !d) return null;
-    return buildElements(d, res, st, { ...netOptionsFromView(opt, res), focus: focus ? focus.split(',').filter(Boolean) : undefined, flow: isFlowMode(layoutMode), flowDir: flowDirOf(layoutMode) }, livePalette());
+    return buildElements(d, res, st, { ...netOptionsFromView(opt, res), focus: focus ? focus.split(',').filter(Boolean) : undefined, flow: isFlowMode(layoutMode), flowDir: flowDirOf(layoutMode), orgEdges: layoutMode === 'org' }, livePalette());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [res, d, st.manualNodes, st.manualLinks, st.accountNotes, opt, focus, theme.value, layoutMode]);
   /** เลือกรูปแบบการจัดผัง — ผังไหลเงินเปิดป้ายบนเส้นให้ (ถ้ายังปิดอยู่) ให้เห็นยอด/จำนวนครั้ง/ทิศทางแบบผังไหลเงินทั่วไป */
@@ -369,7 +373,7 @@ export function NetworkPage() {
   const relayout = () => {
     const cy = cyRef.current;
     if (!cy || !built || built.nodeCount === 0) return;
-    const plan: LayoutPlan = layoutMode === 'concentric' ? { kind: 'concentric' } : isFlowMode(layoutMode) ? { kind: 'flow', dir: flowDirOf(layoutMode) } : { kind: 'fcose', fixed: ownerRing(built.elements), reused: false };
+    const plan: LayoutPlan = freshPlan(layoutMode, built.elements);
     const my = ++runSeq.current;
     void runLayoutPlan(cy, plan, built.nodeCount, true).then(() => {
       if (my !== runSeq.current) return;
@@ -438,10 +442,11 @@ export function NetworkPage() {
               </Field>
               <Field group label="รูปแบบการจัดผัง">
                 <Seg
-                  value={layoutMode} onChange={chooseLayout}
+                  wrap value={layoutMode} onChange={chooseLayout}
                   options={[
                     { value: 'auto' as LayoutMode, label: 'อัตโนมัติ' }, { value: 'concentric' as LayoutMode, label: 'วงซ้อน' },
                     { value: isFlowMode(layoutMode) ? layoutMode : lastFlow.current, label: 'ผังไหลเงิน' },
+                    ...LAYOUTS.filter((l) => isAlgoMode(l.value)).map((l) => ({ value: l.value, label: l.short, title: l.label })),
                   ]}
                 />
                 {isFlowMode(layoutMode) && (

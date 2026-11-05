@@ -370,3 +370,76 @@ test('ผังไหลเงินแนวนอน (ค่าเริ่ม
 
   expect(errors.filter((e) => !/favicon|manifest/i.test(e))).toEqual([]);
 });
+
+test('รูปแบบ Peacock / Packed / Hierarchy / Organization: เลือกได้ จัดผังได้ จำหลังรีโหลด และรายงานบอกรูปแบบ', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'ทดลองด้วยข้อมูลสมมติ' }).click();
+  await expect(page.getByText('ภาพรวมคดี')).toBeVisible();
+  await page.goto('/#/network');
+  await waitGraph(page);
+
+  const snap = () => page.evaluate((sel) => {
+    const cy = (document.querySelector(sel) as any).__cy;
+    const out: Record<string, { x: number; y: number }> = {};
+    cy.nodes().not('.note').forEach((n: any) => { out[n.id()] = { ...n.position() }; });
+    return out;
+  }, HOST);
+  const results: Record<string, Record<string, { x: number; y: number }>> = {};
+  for (const name of ['Peacock', 'Packed', 'Hierarchy', 'Organization']) {
+    const btn = page.getByRole('button', { name, exact: true });
+    await btn.click();
+    await expect(btn).toHaveAttribute('aria-pressed', 'true');
+    await page.waitForTimeout(900);
+    const p = await snap();
+    const pts = Object.values(p);
+    expect(pts.every((q) => Number.isFinite(q.x) && Number.isFinite(q.y))).toBe(true);
+    expect(new Set(pts.map((q) => `${Math.round(q.x)},${Math.round(q.y)}`)).size).toBe(pts.length); // ไม่มีจุดซ้อนกันพอดี
+    results[name] = p;
+    await page.screenshot({ path: shot(`layout-${name.toLowerCase()}`) });
+  }
+  // แต่ละรูปแบบได้ผังต่างกัน
+  const sig = (p: Record<string, { x: number; y: number }>) => JSON.stringify(Object.keys(p).sort().map((k) => [Math.round(p[k]!.x), Math.round(p[k]!.y)]));
+  expect(new Set(Object.values(results).map(sig)).size).toBe(4);
+
+  // Organization: เส้นเงินหักมุมฉาก (round-taxi) เส้นลงจากแม่เข้าลูกเลี้ยวกลางทาง
+  const org = await page.evaluate((sel) => {
+    const cy = (document.querySelector(sel) as any).__cy;
+    const es = cy.edges('.org').not('.elabel');
+    return { n: es.length, taxi: es.filter((e: any) => !e.hasClass('org-flat')).every((e: any) => e.pstyle('curve-style').value === 'round-taxi') };
+  }, HOST);
+  expect(org.n).toBeGreaterThan(5);
+  expect(org.taxi).toBe(true);
+
+  // เมนูคลิกขวา → จัดวาง ▸ มีครบทุกรูปแบบ และ Organization ถูกเลือกอยู่
+  const box = (await page.locator(HOST).boundingBox())!;
+  await page.mouse.click(Math.round(box.x + box.width - 24), Math.round(box.y + box.height - 24), { button: 'right' });
+  const menu = page.getByRole('menu', { name: 'เมนูของผัง' });
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitem', { name: /^จัดวาง/ }).click();
+  for (const name of ['Peacock: ศูนย์กลาง + แฉก', 'Packed: อัดแน่นเป็นกลุ่ม', 'Hierarchy: ชั้นตามทิศเงิน', 'Organization: แผนผังองค์กร']) {
+    await expect(menu.getByRole('menuitemradio', { name })).toBeVisible();
+  }
+  await expect(menu.getByRole('menuitemradio', { name: 'Organization: แผนผังองค์กร' })).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
+
+  // รีโหลด → ยังเป็น Organization และตำแหน่งเดิม
+  await page.waitForTimeout(500);
+  await page.reload();
+  await waitGraph(page);
+  await expect(page.getByRole('button', { name: 'Organization', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const again = await snap();
+  for (const [id, q] of Object.entries(results.Organization!)) {
+    expect(again[id]!.x).toBeCloseTo(q.x, 0);
+    expect(again[id]!.y).toBeCloseTo(q.y, 0);
+  }
+
+  await page.goto('/#/report');
+  await expect(page.locator('img[alt="ผังเครือข่ายความเชื่อมโยงระหว่างบัญชี"]')).toBeVisible({ timeout: 30_000 });
+  await expect(caption(page)).toContainText('รูปแบบ Organization');
+
+  expect(errors.filter((e) => !/favicon|manifest/i.test(e))).toEqual([]);
+});

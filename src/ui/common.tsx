@@ -84,11 +84,11 @@ export function Field(props: { label: string; children: ComponentChildren; hint?
   return props.group ? <div class="field" role="group" aria-label={props.label}>{inner}</div> : <label class="field">{inner}</label>;
 }
 
-export function Seg<T extends string>(props: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+export function Seg<T extends string>(props: { value: T; options: { value: T; label: string; title?: string }[]; onChange: (v: T) => void; wrap?: boolean }) {
   return (
-    <div class="seg" role="group">
+    <div class={'seg' + (props.wrap ? ' wrap' : '')} role="group">
       {props.options.map((o) => (
-        <button key={o.value} aria-pressed={props.value === o.value} onClick={() => props.onChange(o.value)}>{o.label}</button>
+        <button key={o.value} aria-pressed={props.value === o.value} title={o.title} onClick={() => props.onChange(o.value)}>{o.label}</button>
       ))}
     </div>
   );

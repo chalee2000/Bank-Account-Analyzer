@@ -12,6 +12,7 @@ import type { Account, AnalysisResult } from '../../core/types';
 import type { CaseState, Derived, LayoutMode, NetNote, NetworkViewOptions, SavedPositions } from '../../store/model';
 import { bankDisplay, formatAccountNumber } from '../../core/normalize';
 import { fmtBaht, formatThaiDate } from '../../core/thai';
+import { hierarchyPositions, orgPositions, packedPositions, peacockPositions, type LEdge, type LNode } from './layouts';
 
 export type ColorBy = 'role' | 'bank' | 'community';
 export type Scope = 'core' | 'all';
@@ -41,7 +42,13 @@ export interface NetOptions {
   flow?: boolean;
   /** ทิศของผังไหลเงิน: v = แนวตั้ง (ผู้โอนซ้าย ผู้รับขวา), h = แนวนอน (ผู้โอนบน ผู้รับล่าง) */
   flowDir?: 'h' | 'v';
+  /** รูปแบบ Organization: เส้นเงินหักมุมฉากแบบแผนผังองค์กร */
+  orgEdges?: boolean;
 }
+
+/** รูปแบบที่คำนวณตำแหน่งด้วยฟังก์ชันใน layouts.ts */
+export type AlgoLayout = 'peacock' | 'packed' | 'hierarchy' | 'org';
+export const isAlgoMode = (m: LayoutMode | undefined): m is AlgoLayout => m === 'peacock' || m === 'packed' || m === 'hierarchy' || m === 'org';
 
 /** รูปแบบผังไหลเงิน (แนวตั้งหรือแนวนอน) */
 export const isFlowMode = (m: LayoutMode | undefined): boolean => m === 'flow' || m === 'flowh';
@@ -479,7 +486,7 @@ export function buildElements(d: Derived, res: AnalysisResult, st: CaseState, op
     const card = [`${fmtBaht(total)} ฿`, `${count.toLocaleString('en-US')} รายการ`, spanText(first, last)].filter(Boolean).join('\n');
     const pin = pinned.has(`${src}>${dst}`);
     const cls = [lblMode === 'plain' ? 'lbl-plain' : lblMode === 'card' ? 'lbl-card' : '', pin ? (lblMode === 'card' ? 'lbl-card' : 'lbl-pin') : ''];
-    const flow = fCol ? ['flow', fCol.get(src) === 'src' ? 'flow-h' : 'flow-v', ...(fDir === 'h' ? ['flow-x'] : [])] : [];
+    const flow = fCol ? ['flow', fCol.get(src) === 'src' ? 'flow-h' : 'flow-v', ...(fDir === 'h' ? ['flow-x'] : [])] : opts.orgEdges ? ['org'] : [];
     const pill = flowPill(total, count);
     return {
       data: { label: `${fmtBaht(total)} ฿ ×${count}`, card, key: `${src}>${dst}`, ...(fCol ? { pill, pillText: `${pill} ▸`, toff: FLOW_LABEL_OFFSET, z: 30 } : {}) },
@@ -647,11 +654,21 @@ export function makeStyle(pal: Palette): StylesheetJson {
     { selector: 'edge.flow-back.lbl-card', style: { 'source-label': 'data(card)', 'source-text-offset': 'data(toff)' } },
     // เส้นที่ชี้อยู่ยกขึ้น แต่ยังต่ำกว่าเส้นพาป้าย — ไม่ทับป้ายของเส้นอื่น
     { selector: 'edge.flow.hl', style: { 'z-index': 400 } },
+    // Organization: เส้นหักมุมฉากแบบแผนผังองค์กร (ลงจากแม่ → เส้นแนวนอนร่วมของพี่น้อง → ลงเข้าลูก);
+    // เส้นที่ขึ้น (เงินจากลูกไปแม่) เลี้ยวที่ระดับต่างจากเส้นลง เส้นสองทิศของคู่เดียวกันจึงไม่ทับกัน
+    { selector: 'edge.org', style: { 'curve-style': 'round-taxi', 'taxi-direction': 'vertical', 'taxi-turn': '50%', 'taxi-radius': 8, 'taxi-turn-min-distance': 6 } },
+    { selector: 'edge.org.org-up', style: { 'taxi-turn': '32%' } },
+    // เส้นระหว่างบัญชีในชั้นเดียวกัน: โค้งข้ามด้านบน ไม่วิ่งทับแถวผ่านจุดที่อยู่ระหว่างกลาง
+    { selector: 'edge.org.org-flat', style: { 'curve-style': 'unbundled-bezier', 'control-point-distances': [-70], 'control-point-weights': [0.5] } },
+    { selector: 'edge.org.hl', style: { 'z-index': 400 } },
     // เส้นพาป้าย: มองไม่เห็นเส้น/หัวลูกศร (หัวลูกศรใช้ความทึบตาม line-opacity), คลิกทะลุไปถึงเส้นจริง, วาดหลังเส้นเงินทุกเส้น
     {
       selector: 'edge.elabel',
       style: { 'line-opacity': 0, label: '', events: 'no', 'z-index': 500, 'underlay-opacity': 0, 'overlay-opacity': 0, 'text-events': 'no' },
     },
+    // Organization ใช้ป้ายกลางเส้น (ไม่ใช่ป้ายปลายเส้น) — เส้นพาป้ายของรูปแบบนี้จึงคงป้ายกลางไว้
+    { selector: 'edge.elabel.org.lbl-plain, edge.elabel.org.lbl-pin', style: { label: 'data(label)' } },
+    { selector: 'edge.elabel.org.lbl-card', style: { label: 'data(card)' } },
   ] as unknown as StylesheetJson;
 }
 
@@ -1144,8 +1161,9 @@ export function flowRoute(sourceCol: string | undefined, targetCol: string | und
  */
 export function flowRefresh(cy: cytoscapeNS.Core): void {
   const es = cy.edges('.flow').not('.elabel');
+  const orgEs = cy.edges('.org').not('.elabel');
   const carriers = cy.edges('.elabel');
-  if (es.empty() && carriers.empty()) return;
+  if (es.empty() && orgEs.empty() && carriers.empty()) return;
   cy.batch(() => {
     es.forEach((e) => {
       // แนวนอน: คิดในกรอบของแนวตั้ง (สลับ x/y) แล้วใช้ตรรกะเดียวกันทั้งหมด
@@ -1168,12 +1186,20 @@ export function flowRefresh(cy: cytoscapeNS.Core): void {
         : flowLabelOffset(route, e.target().data('fcol') as string | undefined, s, t, (e.target().data('size') as number) || 20, card));
       e.data('z', route === 'flow-v' ? 60 - Math.min(50, Math.round(Math.abs(t.x - s.x) / 40)) : 30);
     });
+    // Organization: เส้นที่ขึ้น (ต้นทางอยู่ต่ำกว่า) เลี้ยวคนละระดับกับเส้นลง
+    orgEs.forEach((e) => {
+      const dy = e.target().position('y') - e.source().position('y');
+      const up = dy < -1;
+      const flat = Math.abs(dy) <= 1;
+      if (up !== e.hasClass('org-up')) e.toggleClass('org-up', up);
+      if (flat !== e.hasClass('org-flat')) e.toggleClass('org-flat', flat);
+    });
     const want = new Set<string>();
-    es.forEach((e) => {
+    es.union(orgEs).forEach((e) => {
       if (!e.hasClass('lbl-plain') && !e.hasClass('lbl-pin') && !e.hasClass('lbl-card')) return;
       const id = 'lbl:' + e.id();
       want.add(id);
-      const data = { pillText: e.data('pillText'), card: e.data('card'), toff: e.data('toff'), color: e.data('color'), width: e.data('width'), z: e.data('z') };
+      const data = { label: e.data('label'), pillText: e.data('pillText'), card: e.data('card'), toff: e.data('toff'), color: e.data('color'), width: e.data('width'), z: e.data('z') };
       const classes = [...(e.classes() as unknown as string[]), 'elabel'].join(' ');
       const c = cy.getElementById(id);
       if (c.empty()) cy.add({ group: 'edges', data: { id, source: e.source().id(), target: e.target().id(), ...data }, classes });
@@ -1208,18 +1234,28 @@ export type LayoutPlan =
   | { kind: 'preset'; positions: Record<string, Pos> }
   | { kind: 'fcose'; fixed: { nodeId: string; position: Pos }[]; reused: boolean }
   | { kind: 'concentric' }
-  | { kind: 'flow'; dir?: 'h' | 'v' };
+  | { kind: 'flow'; dir?: 'h' | 'v' }
+  | { kind: 'algo'; algo: AlgoLayout };
 
 /**
  * เลือกวิธีวางจุด: ผังเหมือนตอนบันทึก → ใช้ตำแหน่งเดิมทั้งหมด (ตรงกับที่ผู้สืบสวนจัดไว้);
  * ผังเปลี่ยน (เช่น นำเข้าไฟล์เพิ่ม/เปลี่ยนตัวกรอง) ในโหมดอัตโนมัติ → ล็อกจุดที่เคยวางไว้ แล้วจัดเฉพาะจุดใหม่;
  * นอกนั้นจัดใหม่ตามรูปแบบ (อัตโนมัติ: เจ้าของบนวงรีตายตัว)
  */
+/** แผนจัดวางใหม่ทั้งผังตามรูปแบบ (ไม่ใช้ตำแหน่งที่บันทึกไว้) — ใช้กับปุ่ม "จัดเรียงใหม่" */
+export function freshPlan(mode: LayoutMode, elements: ElementDefinition[]): LayoutPlan {
+  if (mode === 'concentric') return { kind: 'concentric' };
+  if (isFlowMode(mode)) return { kind: 'flow', dir: flowDirOf(mode) };
+  if (isAlgoMode(mode)) return { kind: 'algo', algo: mode };
+  return { kind: 'fcose', fixed: ownerRing(elements), reused: false };
+}
+
 export function planLayout(mode: LayoutMode, elements: ElementDefinition[], saved?: SavedPositions): LayoutPlan {
   const ids = elements.filter((e) => !('source' in e.data)).map((e) => e.data.id as string);
   if (saved && saved.sig === hashSignature(elements) && ids.every((id) => saved.nodes[id])) return { kind: 'preset', positions: saved.nodes };
   if (mode === 'concentric') return { kind: 'concentric' };
   if (isFlowMode(mode)) return { kind: 'flow', dir: flowDirOf(mode) };
+  if (isAlgoMode(mode)) return { kind: 'algo', algo: mode };
   const kept = saved ? ids.filter((id) => saved.nodes[id]).map((id) => ({ nodeId: id, position: saved.nodes[id]! })) : [];
   if (kept.length >= 2) return { kind: 'fcose', fixed: kept, reused: true };
   return { kind: 'fcose', fixed: ownerRing(elements), reused: false };
@@ -1234,7 +1270,16 @@ export function runLayoutPlan(cy: cytoscapeNS.Core, plan: LayoutPlan, nodeCount:
     return Promise.resolve();
   }
   let layout;
-  if (plan.kind === 'flow') {
+  if (plan.kind === 'algo') {
+    const ns: LNode[] = graph.nodes().map((n) => ({
+      id: n.id(), role: n.data('role') as string, size: n.data('size') as number | undefined, label: n.data('label') as string | undefined,
+      fs: n.data('fs') as number | undefined, tw: n.data('tw') as number | undefined, ring: n.data('ring') as number | undefined,
+    }));
+    const es: LEdge[] = graph.edges().not('.elabel').map((e: cytoscapeNS.EdgeSingular) => ({ source: e.source().id(), target: e.target().id(), total: (e.data('total') as number) || 0 }));
+    const pos = plan.algo === 'peacock' ? peacockPositions(ns, es) : plan.algo === 'packed' ? packedPositions(ns, es)
+      : plan.algo === 'hierarchy' ? hierarchyPositions(ns, es) : orgPositions(ns, es).pos;
+    layout = graph.nodes().layout({ name: 'preset', positions: (n: cytoscapeNS.NodeSingular) => pos[n.id()] ?? n.position(), animate, animationDuration: 450, fit: false } as never);
+  } else if (plan.kind === 'flow') {
     const pos = flowPositions(
       graph.nodes().map((n) => ({
         id: n.id(), role: n.data('role') as string, size: n.data('size') as number | undefined, label: n.data('label') as string | undefined,
@@ -1275,7 +1320,7 @@ export async function renderNetworkImage(
 } | null> {
   const built = buildElements(d, res, st, {
     scope: 'core', topPerOwner: 12, minAmount: 0, showCash: true, colorBy: 'role', showManual: true, ...opts,
-    flow: isFlowMode(layout.mode), flowDir: flowDirOf(layout.mode),
+    flow: isFlowMode(layout.mode), flowDir: flowDirOf(layout.mode), orgEdges: layout.mode === 'org',
   }, PRINT_PALETTE);
   if (built.nodeCount === 0) return null;
   const cytoscape = await loadCytoscape();
