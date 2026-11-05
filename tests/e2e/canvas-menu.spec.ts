@@ -276,6 +276,10 @@ test('ดับเบิลคลิกพื้นที่ว่าง → ผ
   const box = () => page.locator(HOST).boundingBox();
   const normal = (await box())!;
   const pos0 = await graphPositions(page);
+  // แผงตัวกรอง/เครื่องมือ: เปิดอยู่ในหน้าปกติ (จอกว้าง) — เต็มจอแล้วพับเหลือปุ่มเล็ก ออกแล้วกลับมาเปิดเหมือนเดิม
+  const panelBody = page.locator('.net-tools').getByText('รูปแบบการจัดผัง', { exact: true });
+  const panelBtn = page.locator('.net-tools > button');
+  await expect(panelBody).toBeVisible();
   const enterByDblClick = async () => {
     const s = await blankSpot(page);
     expect(s, 'ต้องมีพื้นที่ว่างบนผัง').not.toBeNull();
@@ -288,11 +292,18 @@ test('ดับเบิลคลิกพื้นที่ว่าง → ผ
   await expect(page.locator('.nav')).toBeHidden();
   await expect(page.locator('.topbar')).toBeHidden();
   await expect(exitBtn).toBeVisible();
+  await expect(panelBody).toBeHidden();
+  await expect(panelBtn).toHaveText(/ตัวกรอง \/ เครื่องมือ/);
   await expect.poll(async () => (await box())!.width).toBeGreaterThan(1400);
   expect((await box())!.height).toBeGreaterThan(860);
   await page.waitForTimeout(300);
   expectSamePositions(pos0, await graphPositions(page));
   await page.screenshot({ path: shot('network-fullscreen') });
+  // เปิดแผงชั่วคราวระหว่างเต็มจอได้ แล้วพับกลับ
+  await panelBtn.click();
+  await expect(panelBody).toBeVisible();
+  await panelBtn.click();
+  await expect(panelBody).toBeHidden();
 
   // แตะจุดบัญชีขณะเต็มจอ → แผงรายละเอียดยังเปิดได้; ดับเบิลคลิกบนจุดไม่สลับเต็มจอ
   const node = await page.evaluate((sel) => {
@@ -320,6 +331,7 @@ test('ดับเบิลคลิกพื้นที่ว่าง → ผ
   await expect(html).not.toHaveClass(/net-max/);
   await expect(page.locator('.nav')).toBeVisible();
   await expect(exitBtn).toBeHidden();
+  await expect(panelBody).toBeVisible();
   await expect.poll(async () => Math.round((await box())!.width)).toBe(Math.round(normal.width));
   expectSamePositions(pos0, await graphPositions(page));
 
@@ -328,10 +340,12 @@ test('ดับเบิลคลิกพื้นที่ว่าง → ผ
     await openCanvasMenu(page);
     await canvasMenu(page).getByRole('menuitem', { name: /ขยายเต็มจอ/ }).click();
     await expect(html).toHaveClass(/net-max/);
+    await expect(panelBody).toBeHidden();
     if (exit === 'button') await exitBtn.click();
     else await page.keyboard.press('Escape');
     await expect(html).not.toHaveClass(/net-max/);
     await expect(page.locator('.nav')).toBeVisible();
+    await expect(panelBody).toBeVisible();
   }
 
   // ไปหน้าอื่นขณะเต็มจอ → กลับสู่หน้าปกติ

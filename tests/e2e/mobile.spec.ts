@@ -114,5 +114,8 @@ test('iPhone: กดค้างที่พื้นที่ว่าง/จ�
   await doubleTap(blank!);
   await expect(page.locator('html')).not.toHaveClass(/net-max/);
   await expect(page.locator('.tabbar')).toBeVisible();
+  // จอแคบ: แผงตัวกรองพับอยู่ก่อนเข้าเต็มจอ ออกมาแล้วยังพับ
+  await expect(page.locator('.net-tools').getByText('รูปแบบการจัดผัง', { exact: true })).toBeHidden();
+  await expect(page.locator('.net-tools > button')).toHaveText(/ตัวกรอง \/ เครื่องมือ/);
   expect(errors).toEqual([]);
 });

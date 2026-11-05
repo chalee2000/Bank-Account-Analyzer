@@ -307,9 +307,18 @@ export function NetworkPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // เข้า/ออกเต็มจอ: สลับคลาสที่ <html> (CSS ซ่อนเมนูซ้าย/แถบหัว) แล้วปรับขนาดผังและจัดให้พอดี — ไม่จัดวางใหม่
+  // เข้า/ออกเต็มจอ: สลับคลาสที่ <html> (CSS ซ่อนเมนูซ้าย/แถบหัว), พับแผงตัวกรอง/เครื่องมือ (เหลือปุ่มเล็กไว้เปิดเมื่อจำเป็น)
+  // แล้วปรับขนาดผังและจัดให้พอดี — ไม่จัดวางใหม่; ออกจากเต็มจอทุกทางผ่านตรงนี้ จึงคืนสถานะแผงเดิมที่นี่
+  const panelBeforeFull = useRef<boolean | null>(null);
   useEffect(() => {
     document.documentElement.classList.toggle('net-max', full);
+    if (full) {
+      if (panelBeforeFull.current === null) panelBeforeFull.current = panelOpen;
+      setPanelOpen(false);
+    } else if (panelBeforeFull.current !== null) {
+      setPanelOpen(panelBeforeFull.current);
+      panelBeforeFull.current = null;
+    }
     const cy = cyRef.current;
     if (!cy || !ready) return;
     const id = requestAnimationFrame(() => { cy.resize(); autoFitRef.current(cy); });
