@@ -75,12 +75,24 @@ async function edgeSpots(page: Page) {
 const canvasMenu = (page: Page) => page.getByRole('menu', { name: 'เมนูของผัง' });
 
 async function openCanvasMenu(page: Page) {
+  await settleView(page);
   const s = await blankSpot(page);
   expect(s, 'ต้องมีพื้นที่ว่างบนผังให้คลิกขวา').not.toBeNull();
   await page.mouse.click(s!.x, s!.y, { button: 'right' });
   await expect(canvasMenu(page)).toBeVisible();
   return s!;
 }
+
+/** รอให้มุมมองผังนิ่ง (การเปิด/พับแผงหรือเข้า/ออกเต็มจอจัดผังให้พอดีใหม่หลังจากนั้นเล็กน้อย) ก่อนหาตำแหน่งบนจอ */
+const settleView = (page: Page) =>
+  page.waitForFunction((sel) => {
+    const cy = (document.querySelector(sel) as any).__cy;
+    const v = JSON.stringify([cy.zoom(), cy.pan()]);
+    const w = window as any;
+    const same = w.__vp === v;
+    w.__vp = v;
+    return same;
+  }, HOST, { polling: 200, timeout: 10_000 });
 
 const expectSamePositions = (a: Record<string, P>, b: Record<string, P>) => {
   expect(Object.keys(b).sort()).toEqual(Object.keys(a).sort());
@@ -281,6 +293,7 @@ test('ดับเบิลคลิกพื้นที่ว่าง → ผ
   const panelBtn = page.locator('.net-tools > button');
   await expect(panelBody).toBeVisible();
   const enterByDblClick = async () => {
+    await settleView(page);
     const s = await blankSpot(page);
     expect(s, 'ต้องมีพื้นที่ว่างบนผัง').not.toBeNull();
     await page.mouse.dblclick(s!.x, s!.y);
@@ -304,6 +317,7 @@ test('ดับเบิลคลิกพื้นที่ว่าง → ผ
   await expect(panelBody).toBeVisible();
   await panelBtn.click();
   await expect(panelBody).toBeHidden();
+  await settleView(page);
 
   // แตะจุดบัญชีขณะเต็มจอ → แผงรายละเอียดยังเปิดได้; ดับเบิลคลิกบนจุดไม่สลับเต็มจอ
   const node = await page.evaluate((sel) => {
@@ -327,6 +341,7 @@ test('ดับเบิลคลิกพื้นที่ว่าง → ผ
   await expect(page.locator('.inspector')).toBeHidden();
 
   // ดับเบิลคลิกพื้นที่ว่างอีกครั้ง → กลับหน้าปกติ ขนาดเดิม
+  await settleView(page);
   await enterByDblClick();
   await expect(html).not.toHaveClass(/net-max/);
   await expect(page.locator('.nav')).toBeVisible();
@@ -349,6 +364,7 @@ test('ดับเบิลคลิกพื้นที่ว่าง → ผ
   }
 
   // ไปหน้าอื่นขณะเต็มจอ → กลับสู่หน้าปกติ
+  await settleView(page);
   await enterByDblClick();
   await expect(html).toHaveClass(/net-max/);
   await page.goto('/#/transactions');
